@@ -25,20 +25,31 @@ def analyze_stock(ticker, lookback_days):
         print("Analyzing sentiment... (AI running)")
         
         # Pass 'ticker' so the AI knows which company to focus on (Context Filter)
-        sentiment_df = analyzer.get_sentiment(raw_data, ticker)
-        best_news, worst_news = analyzer.get_top_headlines(raw_data, ticker)
+        sentiment_df = analyzer.get_sentiment(raw_data, ticker, lookback_days)
+        best_news, worst_news = analyzer.get_top_headlines(raw_data, ticker, lookback_days)
         
         # 5. FILTER DATES LOCALLY
         # Ensure we don't accidentally include data outside the requested window
         today = datetime.now()
         cutoff_date = (today - timedelta(days=lookback_days)).date()
-        sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
+        
+        # Handle different index types for comparison
+        if lookback_days <= 1:
+            # For hourly data, convert cutoff to datetime for comparison
+            import pytz
+            cutoff_datetime = datetime.combine(cutoff_date, datetime.min.time()).replace(tzinfo=pytz.utc)
+            sentiment_df = sentiment_df[sentiment_df.index >= cutoff_datetime]
+        else:
+            # For daily data, ensure index is date type for comparison
+            if hasattr(sentiment_df.index[0], 'date'):
+                sentiment_df.index = sentiment_df.index.date
+            sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
 
         if sentiment_df.empty:
             print(f"No relevant news found for {ticker} in the last {lookback_days} days.")
         else:
             # 6. MARKET DATA & ALGO
-            final_df = market.get_financials(ticker, sentiment_df)
+            final_df = market.get_financials(ticker, sentiment_df, lookback_days)
             
             # 7. PRINT VERDICT
             # This now uses the "Weighted Average" logic (Recency Bias)
@@ -62,7 +73,7 @@ def analyze_stock(ticker, lookback_days):
                 print("="*50 + "\n")
             
             # 8. PLOT GRAPH
-            visualizer.plot_graph(ticker, final_df, profile_data)
+            visualizer.plot_graph(ticker, final_df, profile_data, lookback_days)
     else:
         print("Scraping failed or no data found.")
 
@@ -89,8 +100,8 @@ def main():
         print("\nSelect Timeframe:")
         print("1. 1D  (1 Day)")
         print("2. 5D  (5 Days)")
-        print("3. 1W  (1 Week)")
-        print("4. 1M  (1 Month)")
+        print("3. 1M  (1 Month)")
+        print("4. 6M  (6 Months)")
         print("5. YTD (Year-To-Date)")
         print("6. MAX (Max Available Data)") # Combined 1Y/MAX
         
@@ -103,10 +114,10 @@ def main():
             lookback_days = 1
         elif choice in ['2', '5D']:
             lookback_days = 5
-        elif choice in ['3', '1W']:
-            lookback_days = 7
-        elif choice in ['4', '1M']:
+        elif choice in ['3', '1M']:
             lookback_days = 30
+        elif choice in ['4', '6M']:
+            lookback_days = 180
         elif choice in ['5', 'YTD']:
             # Calculate days since Jan 1st
             start_of_year = datetime(today.year, 1, 1)

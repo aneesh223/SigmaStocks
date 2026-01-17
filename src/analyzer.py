@@ -101,9 +101,10 @@ def validate_target(headline, ticker, raw_score):
                     
     return raw_score
 
-def get_sentiment(parsed_data, ticker):
+def get_sentiment(parsed_data, ticker, timeframe_days=30):
     """
     Main Logic: Clean -> Score -> Validate -> Weight
+    timeframe_days: Used to determine grouping granularity
     """
     if not parsed_data:
         return pd.DataFrame()
@@ -154,13 +155,19 @@ def get_sentiment(parsed_data, ticker):
     # Clamp score to stay within -1.0 to 1.0
     df['Compound_Score'] = df['Compound_Score'].clip(-1.0, 1.0)
     
-    # Group by Date
-    df['Date'] = df['Timestamp'].dt.date
-    mean_scores = df.groupby(['Date']).mean(numeric_only=True)
+    # Group by appropriate time interval based on timeframe
+    if timeframe_days <= 1:
+        # 1 day: Group by hour
+        df['TimeGroup'] = df['Timestamp'].dt.floor('h')
+    else:
+        # 5 days and longer: Group by day
+        df['TimeGroup'] = df['Timestamp'].dt.date
+    
+    mean_scores = df.groupby(['TimeGroup']).mean(numeric_only=True)
     
     return mean_scores
 
-def get_top_headlines(parsed_data, ticker):
+def get_top_headlines(parsed_data, ticker, timeframe_days=30):
     """
     Returns the most impactful headlines for display.
     """
