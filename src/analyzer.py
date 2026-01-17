@@ -55,7 +55,13 @@ def clean_headline(text):
         # "Top Pick" logic
         "buy rating": "perfect",
         "strong buy": "perfect",
-        "outperform": "winner"
+        "outperform": "winner",
+        
+        # Clickbait Fixes (NEW)
+        "if i could only buy": "best stock",
+        "single stock": "best stock",
+        "only buy and hold": "perfect stock",
+        "stock to buy": "good stock"
     }
     
     for phrase, replacement in replacements.items():
@@ -114,6 +120,9 @@ def get_sentiment(parsed_data, ticker):
         'error': 0.0, 'loom': 0.0, 'vice': 0.0, 'tank': -2.5,
         'gross': 0.0, 'mine': 0.0, 'arrest': 0.0,
         
+        # Brand Names (NEW)
+        'fool': 0.0, 'motley': 0.0, 
+        
         # Earnings
         'beat': 2.5, 'miss': -2.5, 'crush': 3.0, 'surprise': 1.5,
         
@@ -162,7 +171,7 @@ def get_top_headlines(parsed_data, ticker):
     
     # Re-initialize VADER for ranking
     vader = sia()
-    vader.lexicon.update({'beat': 2.5, 'miss': -2.5, 'rally': 2.5, 'flat': -1.5})
+    vader.lexicon.update({'beat': 2.5, 'miss': -2.5, 'rally': 2.5, 'flat': -1.5, 'fool': 0.0})
 
     # Apply same logic chain for ranking
     df['Cleaned'] = df['Headline'].apply(clean_headline)
