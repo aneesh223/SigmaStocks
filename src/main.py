@@ -9,7 +9,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
     print(f"Strategy: {strategy_mode}")
     
     try:
-        profile_data, raw_data = scraper.scrape_finviz(ticker, days=lookback_days)
+        profile_data, raw_data = scraper.scrape_gnews(ticker, days=lookback_days)
         company_name, industry, mkt_cap = profile_data
         
     except Exception as e:
@@ -48,9 +48,21 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
                 print(f"Industry:   {industry}")
                 print(f"Market Cap: {mkt_cap}")
                 print("-" * 50)
-                print(f"Strategy:         {strategy_mode}")
-                print(f"Sentiment Health: {verdict['Sentiment_Score']}/10")
-                print(f"Price Value:      {verdict['Value_Score']}/10")
+                print(f"Strategy:           {strategy_mode}")
+                print(f"Overall Sentiment:  {verdict['Sentiment_Score']}/10")
+                
+                # Only show categories with sufficient data
+                valid_categories = verdict.get('Valid_Categories', [])
+                if 'Primary' in valid_categories:
+                    print(f"� Primary Sources:  {verdict['Primary_Score']}/10")
+                if 'Institutional' in valid_categories:
+                    print(f"🏛️  Institutional:    {verdict['Institutional_Score']}/10")
+                if 'Aggregator' in valid_categories:
+                    print(f"📈 Aggregators:      {verdict['Aggregator_Score']}/10")
+                if 'Entertainment' in valid_categories:
+                    print(f"📺 Entertainment:    {verdict['Entertainment_Score']}/10")
+                
+                print(f"Price Value:        {verdict['Value_Score']}/10")
                 print("-" * 50)
                 print(f"FINAL BUY SCORE:  {verdict['Final_Score']}/10")
                 print(f"\nREASONING:\n{verdict['Explanation']}")

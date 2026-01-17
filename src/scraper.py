@@ -35,7 +35,7 @@ def get_profile_data(ticker):
         print(f"API Error: {e}")
         return ticker.upper(), "N/A", "N/A"
 
-def scrape_finviz(ticker, days=30):
+def scrape_gnews(ticker, days=30):
     profile_data = get_profile_data(ticker)
     
     print(f"Searching Google News (RSS) for {ticker} over last {days} days...")

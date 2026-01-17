@@ -7,19 +7,52 @@ try:
 except LookupError:
     nltk.download('vader_lexicon')
 
+# Updated source categorization based on reliability and purpose
+# 1. THE HOLY GRAIL - Unvarnished facts, no opinions, just numbers
+PRIMARY_SOURCES = {
+    'SEC EDGAR', 'SEC', 'U.S. Securities and Exchange Commission', 
+    'Company Investor Relations', 'Investor Relations'
+}
+
+# 2. THE PROFESSIONAL GRADE - High integrity, expensive, fact-checked
+# Used by people moving millions, not hundreds
+INSTITUTIONAL_SOURCES = {
+    'Bloomberg', 'Reuters', 'The Wall Street Journal', 'Financial Times', 
+    'Barron\'s', 'Morningstar', 'Investor\'s Business Daily'
+}
+
+# 3. THE AGGREGATORS - Good for quick data checks, mix hard data with opinions
+DATA_AGGREGATORS = {
+    'Yahoo Finance', 'MarketWatch', 'Seeking Alpha', 'Zacks', 'TipRanks'
+}
+
+# 4. THE NOISE MACHINE - Exists to sell ads, excitement, and anxiety
+ENTERTAINMENT_SOURCES = {
+    'The Motley Fool', 'CNBC', 'CNN Business', 'Fox Business', 'MSN',
+    'USA Today', 'Forbes', 'Fortune', 'Business Insider', 'Reddit',
+    'Twitter', 'StockTwits', 'Robinhood Snacks', 'Benzinga', 'TheStreet'
+}
+
+# Updated weights based on new categorization
 SOURCE_WEIGHTS = {
-    'Bloomberg': 1.5,
-    'Reuters': 1.5,
-    'The Wall Street Journal': 1.5,
-    'Financial Times': 1.5,
-    'CNBC': 1.2,
-    'Yahoo Finance': 1.0,
-    'MarketWatch': 1.0,
-    'The Motley Fool': 0.7,
-    'Seeking Alpha': 0.7,
-    'Benzinga': 0.8,
-    'Zacks': 0.8,
-    'MSN': 1.0
+    # Primary sources get highest weight
+    'SEC EDGAR': 2.0, 'SEC': 2.0, 'U.S. Securities and Exchange Commission': 2.0,
+    'Company Investor Relations': 2.0, 'Investor Relations': 2.0,
+    
+    # Institutional sources - high weight
+    'Bloomberg': 1.8, 'Reuters': 1.8, 'The Wall Street Journal': 1.8, 
+    'Financial Times': 1.8, 'Barron\'s': 1.7, 'Morningstar': 1.6,
+    'Investor\'s Business Daily': 1.6,
+    
+    # Data aggregators - moderate weight
+    'Yahoo Finance': 1.2, 'MarketWatch': 1.2, 'Seeking Alpha': 1.0, 
+    'Zacks': 1.0, 'TipRanks': 1.0,
+    
+    # Entertainment sources - lower weight
+    'The Motley Fool': 0.6, 'CNBC': 0.8, 'CNN Business': 0.7, 
+    'Fox Business': 0.7, 'MSN': 0.6, 'USA Today': 0.5, 'Forbes': 0.7,
+    'Fortune': 0.7, 'Business Insider': 0.6, 'Reddit': 0.4, 'Twitter': 0.3,
+    'StockTwits': 0.4, 'Robinhood Snacks': 0.3, 'Benzinga': 0.5, 'TheStreet': 0.5
 }
 
 def clean_headline(text):
@@ -71,6 +104,44 @@ def validate_target(headline, ticker, raw_score):
                     
     return raw_score
 
+def categorize_source(source):
+    """Categorize news source based on reliability and purpose hierarchy"""
+    # Check exact matches first
+    if source in PRIMARY_SOURCES:
+        return 'primary'
+    elif source in INSTITUTIONAL_SOURCES:
+        return 'institutional'
+    elif source in DATA_AGGREGATORS:
+        return 'aggregator'
+    elif source in ENTERTAINMENT_SOURCES:
+        return 'entertainment'
+    else:
+        # Smart categorization based on keywords for unknown sources
+        source_lower = source.lower()
+        
+        # Primary source keywords
+        if any(keyword in source_lower for keyword in ['sec', 'securities and exchange commission', 'investor relations']):
+            return 'primary'
+        
+        # Institutional keywords
+        elif any(keyword in source_lower for keyword in ['bloomberg', 'reuters', 'wall street journal', 'financial times', 'barron']):
+            return 'institutional'
+        
+        # Aggregator keywords
+        elif any(keyword in source_lower for keyword in ['yahoo finance', 'marketwatch', 'seeking alpha', 'zacks']):
+            return 'aggregator'
+        
+        # Entertainment keywords
+        elif any(keyword in source_lower for keyword in ['motley', 'fool', 'reddit', 'twitter', 'robinhood', 'benzinga', 'thestreet']):
+            return 'entertainment'
+        
+        # Default to aggregator for unknown financial sources
+        elif any(keyword in source_lower for keyword in ['financial', 'market', 'invest', 'stock', 'trading']):
+            return 'aggregator'
+        
+        else:
+            return 'entertainment'  # Default to lowest tier for unknown sources
+
 def get_sentiment(parsed_data, ticker, timeframe_days=30):
     if not parsed_data:
         return pd.DataFrame()
@@ -97,6 +168,9 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     
     df['Raw_Score'] = df.apply(lambda row: validate_target(row['Headline'], ticker, row['Raw_Score']), axis=1)
     
+    # Categorize sources
+    df['Source_Type'] = df['Source'].apply(categorize_source)
+    
     df['Weight'] = df['Source'].apply(lambda x: SOURCE_WEIGHTS.get(x, 1.0))
     df['Compound_Score'] = df['Raw_Score'] * df['Weight']
     
@@ -107,9 +181,51 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     else:
         df['TimeGroup'] = df['Timestamp'].dt.date
     
-    mean_scores = df.groupby(['TimeGroup']).mean(numeric_only=True)
+    # Calculate separate sentiment scores by source type
+    primary_df = df[df['Source_Type'] == 'primary']
+    institutional_df = df[df['Source_Type'] == 'institutional']
+    aggregator_df = df[df['Source_Type'] == 'aggregator']
+    entertainment_df = df[df['Source_Type'] == 'entertainment']
     
-    return mean_scores
+    # Group by time and calculate means for each category
+    overall_scores = df.groupby(['TimeGroup']).agg({
+        'Compound_Score': 'mean',
+        'Raw_Score': 'mean',
+        'Weight': 'mean'
+    })
+    
+    primary_scores = primary_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not primary_df.empty else pd.Series(dtype=float)
+    institutional_scores = institutional_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not institutional_df.empty else pd.Series(dtype=float)
+    aggregator_scores = aggregator_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not aggregator_df.empty else pd.Series(dtype=float)
+    entertainment_scores = entertainment_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not entertainment_df.empty else pd.Series(dtype=float)
+    
+    # Combine all sentiment data
+    result_df = overall_scores.copy()
+    result_df['Primary_Sentiment'] = primary_scores
+    result_df['Institutional_Sentiment'] = institutional_scores
+    result_df['Aggregator_Sentiment'] = aggregator_scores
+    result_df['Entertainment_Sentiment'] = entertainment_scores
+    
+    # Fill NaN values with 0 for missing sentiment types
+    result_df['Primary_Sentiment'] = result_df['Primary_Sentiment'].fillna(0)
+    result_df['Institutional_Sentiment'] = result_df['Institutional_Sentiment'].fillna(0)
+    result_df['Aggregator_Sentiment'] = result_df['Aggregator_Sentiment'].fillna(0)
+    result_df['Entertainment_Sentiment'] = result_df['Entertainment_Sentiment'].fillna(0)
+    
+    # Calculate counts for each category
+    primary_counts = primary_df.groupby(['TimeGroup']).size() if not primary_df.empty else pd.Series(dtype=int)
+    institutional_counts = institutional_df.groupby(['TimeGroup']).size() if not institutional_df.empty else pd.Series(dtype=int)
+    aggregator_counts = aggregator_df.groupby(['TimeGroup']).size() if not aggregator_df.empty else pd.Series(dtype=int)
+    entertainment_counts = entertainment_df.groupby(['TimeGroup']).size() if not entertainment_df.empty else pd.Series(dtype=int)
+    
+    result_df['Primary_Count'] = primary_counts.reindex(result_df.index, fill_value=0)
+    result_df['Institutional_Count'] = institutional_counts.reindex(result_df.index, fill_value=0)
+    result_df['Aggregator_Count'] = aggregator_counts.reindex(result_df.index, fill_value=0)
+    result_df['Entertainment_Count'] = entertainment_counts.reindex(result_df.index, fill_value=0)
+    
+    print(f"Source breakdown - Primary: {len(primary_df)}, Institutional: {len(institutional_df)}, Aggregator: {len(aggregator_df)}, Entertainment: {len(entertainment_df)}")
+    
+    return result_df
 
 def get_top_headlines(parsed_data, ticker, timeframe_days=30):
     if not parsed_data:

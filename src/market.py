@@ -137,9 +137,77 @@ def calculate_verdict(df, strategy_mode="BALANCED"):
     n = len(df)
     weights = np.linspace(0.2, 1.0, n)
     
+    # Calculate weighted sentiment for overall, insider, and consumer
     weighted_sentiment = np.average(df['Compound_Score'], weights=weights)
     
+def calculate_verdict(df, strategy_mode="BALANCED"):
+    if df.empty:
+        return None
+
+    df = df.sort_index(ascending=True)
+    
+    n = len(df)
+    weights = np.linspace(0.2, 1.0, n)
+    
+    # Calculate weighted sentiment for overall
+    weighted_sentiment = np.average(df['Compound_Score'], weights=weights)
+    
+    # Calculate separate sentiment for each source tier with minimum article thresholds
+    MIN_ARTICLES_THRESHOLD = 3  # Minimum articles needed to show a category
+    
+    primary_sentiment = 0.0
+    institutional_sentiment = 0.0
+    aggregator_sentiment = 0.0
+    entertainment_sentiment = 0.0
+    
+    # Track which categories have sufficient data
+    valid_categories = {}
+    
+    if 'Primary_Sentiment' in df.columns and not df['Primary_Sentiment'].isna().all():
+        primary_mask = ~df['Primary_Sentiment'].isna()
+        primary_article_count = df['Primary_Count'].sum() if 'Primary_Count' in df.columns else 0
+        if primary_mask.any() and primary_article_count >= MIN_ARTICLES_THRESHOLD:
+            primary_sentiment = np.average(df.loc[primary_mask, 'Primary_Sentiment'], 
+                                         weights=weights[primary_mask])
+            valid_categories['Primary'] = (primary_sentiment, primary_article_count)
+    
+    if 'Institutional_Sentiment' in df.columns and not df['Institutional_Sentiment'].isna().all():
+        institutional_mask = ~df['Institutional_Sentiment'].isna()
+        institutional_article_count = df['Institutional_Count'].sum() if 'Institutional_Count' in df.columns else 0
+        if institutional_mask.any() and institutional_article_count >= MIN_ARTICLES_THRESHOLD:
+            institutional_sentiment = np.average(df.loc[institutional_mask, 'Institutional_Sentiment'], 
+                                               weights=weights[institutional_mask])
+            valid_categories['Institutional'] = (institutional_sentiment, institutional_article_count)
+    
+    if 'Aggregator_Sentiment' in df.columns and not df['Aggregator_Sentiment'].isna().all():
+        aggregator_mask = ~df['Aggregator_Sentiment'].isna()
+        aggregator_article_count = df['Aggregator_Count'].sum() if 'Aggregator_Count' in df.columns else 0
+        if aggregator_mask.any() and aggregator_article_count >= MIN_ARTICLES_THRESHOLD:
+            aggregator_sentiment = np.average(df.loc[aggregator_mask, 'Aggregator_Sentiment'], 
+                                            weights=weights[aggregator_mask])
+            valid_categories['Aggregator'] = (aggregator_sentiment, aggregator_article_count)
+    
+    if 'Entertainment_Sentiment' in df.columns and not df['Entertainment_Sentiment'].isna().all():
+        entertainment_mask = ~df['Entertainment_Sentiment'].isna()
+        entertainment_article_count = df['Entertainment_Count'].sum() if 'Entertainment_Count' in df.columns else 0
+        if entertainment_mask.any() and entertainment_article_count >= MIN_ARTICLES_THRESHOLD:
+            entertainment_sentiment = np.average(df.loc[entertainment_mask, 'Entertainment_Sentiment'], 
+                                               weights=weights[entertainment_mask])
+            valid_categories['Entertainment'] = (entertainment_sentiment, entertainment_article_count)
+    
+    # Convert to 0-10 scale only for valid categories
     sentiment_score = (weighted_sentiment + 1) * 5
+    
+    # Only calculate scores for categories with sufficient data
+    category_scores = {}
+    if 'Primary' in valid_categories:
+        category_scores['Primary_Score'] = (valid_categories['Primary'][0] + 1) * 5
+    if 'Institutional' in valid_categories:
+        category_scores['Institutional_Score'] = (valid_categories['Institutional'][0] + 1) * 5
+    if 'Aggregator' in valid_categories:
+        category_scores['Aggregator_Score'] = (valid_categories['Aggregator'][0] + 1) * 5
+    if 'Entertainment' in valid_categories:
+        category_scores['Entertainment_Score'] = (valid_categories['Entertainment'][0] + 1) * 5
     
     value_score = 5.0
     momentum_score = 5.0
@@ -195,9 +263,35 @@ def calculate_verdict(df, strategy_mode="BALANCED"):
     else:
         sentiment_reasoning = "News sentiment is VERY NEGATIVE."
 
+    # Add source tier analysis - only for categories with sufficient data
+    sentiment_breakdown = ""
+    
+    if len(valid_categories) >= 2:
+        # Sort by sentiment value
+        sorted_categories = sorted(valid_categories.items(), key=lambda x: x[1][0], reverse=True)
+        highest_name, (highest_sentiment, highest_count) = sorted_categories[0]
+        lowest_name, (lowest_sentiment, lowest_count) = sorted_categories[-1]
+        
+        sentiment_diff = highest_sentiment - lowest_sentiment
+        
+        if sentiment_diff > 0.3:
+            sentiment_breakdown = f" {highest_name.upper()} sources ({highest_count} articles) much more bullish than {lowest_name.upper()} ({lowest_count} articles)."
+        elif sentiment_diff > 0.15:
+            sentiment_breakdown = f" {highest_name.upper()} sources more optimistic than {lowest_name.upper()}."
+        else:
+            category_names = [name.upper() for name in valid_categories.keys()]
+            sentiment_breakdown = f" {', '.join(category_names)} sources showing ALIGNED sentiment."
+    
+    elif len(valid_categories) == 1:
+        category_name, (_, count) = list(valid_categories.items())[0]
+        sentiment_breakdown = f" Coverage primarily from {category_name.upper()} sources ({count} articles)."
+    
+    else:
+        sentiment_breakdown = " Insufficient reliable news coverage for analysis."
+
     final_score = final_score if 'final_score' in locals() else (sentiment_score * 0.6) + (value_score * 0.4)
     
-    explanation = f"{sentiment_reasoning} {price_reasoning}"
+    explanation = f"{sentiment_reasoning}{sentiment_breakdown} {price_reasoning}"
     
     # Return appropriate score based on strategy
     if strategy_mode == "MOMENTUM":
@@ -205,9 +299,17 @@ def calculate_verdict(df, strategy_mode="BALANCED"):
     else:
         display_score = value_score
     
-    return {
+    # Build return dictionary with only valid categories
+    result = {
         'Sentiment_Score': round(sentiment_score, 1),
         'Value_Score': round(display_score, 1),
         'Final_Score': round(final_score, 1),
-        'Explanation': explanation
+        'Explanation': explanation,
+        'Valid_Categories': list(valid_categories.keys())  # Track which categories are valid
     }
+    
+    # Add scores only for valid categories
+    for category, score in category_scores.items():
+        result[category] = round(score, 1)
+    
+    return result
