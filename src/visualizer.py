@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
 
-def plot_graph(ticker, merged_df, company_info, timeframe_days=30):
+def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode="BALANCED"):
     name, industry, mkt_cap = company_info
     
     fig, ax1 = plt.subplots(figsize=(12, 7))
@@ -55,9 +55,9 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30):
         print("No Close price column found or all values are NaN")
 
     if timeframe_days <= 1:
-        title_suffix = "Hourly Sentiment Analysis"
+        title_suffix = f"Hourly Sentiment Analysis ({strategy_mode} Strategy)"
     else:
-        title_suffix = "Daily Sentiment Analysis"
+        title_suffix = f"Daily Sentiment Analysis ({strategy_mode} Strategy)"
         
     plt.title(f'{name} ({ticker}) - {title_suffix}')
     

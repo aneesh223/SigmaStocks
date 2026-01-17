@@ -4,8 +4,9 @@ import analyzer
 import market
 import visualizer
 
-def analyze_stock(ticker, lookback_days):
+def analyze_stock(ticker, lookback_days, strategy_mode):
     print(f"\nFetching data for {ticker} over last {lookback_days} days...")
+    print(f"Strategy: {strategy_mode}")
     
     try:
         profile_data, raw_data = scraper.scrape_finviz(ticker, days=lookback_days)
@@ -38,7 +39,7 @@ def analyze_stock(ticker, lookback_days):
         else:
             final_df = market.get_financials(ticker, sentiment_df, lookback_days)
             
-            verdict = market.calculate_verdict(final_df)
+            verdict = market.calculate_verdict(final_df, strategy_mode)
             
             if verdict:
                 print("\n" + "="*50)
@@ -47,6 +48,7 @@ def analyze_stock(ticker, lookback_days):
                 print(f"Industry:   {industry}")
                 print(f"Market Cap: {mkt_cap}")
                 print("-" * 50)
+                print(f"Strategy:         {strategy_mode}")
                 print(f"Sentiment Health: {verdict['Sentiment_Score']}/10")
                 print(f"Price Value:      {verdict['Value_Score']}/10")
                 print("-" * 50)
@@ -57,7 +59,7 @@ def analyze_stock(ticker, lookback_days):
                 print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")
                 print("="*50 + "\n")
             
-            visualizer.plot_graph(ticker, final_df, profile_data, lookback_days)
+            visualizer.plot_graph(ticker, final_df, profile_data, lookback_days, strategy_mode)
     else:
         print("Scraping failed or no data found.")
 
@@ -109,7 +111,24 @@ def main():
             print("Invalid selection. Defaulting to 1 Month.")
             lookback_days = 30
 
-        analyze_stock(ticker, lookback_days)
+        print("\nSelect Investment Strategy:")
+        print("1. VALUE    (Buy dips - contrarian approach)")
+        print("2. MOMENTUM (Follow trends - derivative-based)")
+        print("3. BALANCED (Combine both approaches)")
+        
+        strategy_choice = input("Enter strategy choice (1-3): ").strip()
+        
+        if strategy_choice == '1':
+            strategy_mode = "VALUE"
+        elif strategy_choice == '2':
+            strategy_mode = "MOMENTUM"
+        elif strategy_choice == '3':
+            strategy_mode = "BALANCED"
+        else:
+            print("Invalid selection. Defaulting to BALANCED.")
+            strategy_mode = "BALANCED"
+
+        analyze_stock(ticker, lookback_days, strategy_mode)
 
 if __name__ == "__main__":
     main()
