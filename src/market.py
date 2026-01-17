@@ -1,91 +1,124 @@
-import yfinance as yf
 import pandas as pd
-from datetime import timedelta
+import numpy as np
+import yfinance as yf
+from datetime import datetime, timedelta
 
 def get_financials(ticker, sentiment_df):
     """
-    Downloads stock data matching the sentiment dates and calculates the Buy Algo.
+    Combines the Sentiment Data with Price Data.
     """
-    # Define Range based on sentiment data
-    data_start = sentiment_df.index.min()
-    data_end = sentiment_df.index.max() + timedelta(days=1)
+    if sentiment_df.empty:
+        return sentiment_df
     
-    print(f"Downloading prices from {data_start} to {data_end}...")
-    
-    # Download Data
-    stock_data = yf.download(ticker, start=data_start, end=data_end, progress=False)
-    
-    # --- FIX 1: FLATTEN MULTI-INDEX COLUMNS ---
-    # yfinance sometimes returns columns like ('Close', 'NVDA') instead of just 'Close'
-    if isinstance(stock_data.columns, pd.MultiIndex):
-        stock_data.columns = stock_data.columns.get_level_values(0)
-    
-    # --- FIX 2: NORMALIZE TIMEZONES ---
-    # Remove timezone info so we can merge with our simple Date index
-    if stock_data.index.tz is not None:
-        stock_data.index = stock_data.index.tz_localize(None)
+    try:
+        # Get stock price data for the same date range as sentiment data
+        start_date = sentiment_df.index.min()
+        end_date = sentiment_df.index.max() + timedelta(days=1)  # Add 1 day to include end date
+        
+        # Fetch stock data
+        stock = yf.Ticker(ticker)
+        price_data = stock.history(start=start_date, end=end_date)
+        
+        if price_data.empty:
+            print("No price data found for the given date range")
+            return sentiment_df
+        
+        # Convert price data index to date (remove time component)
+        price_data.index = price_data.index.date
+        
+        # Merge sentiment and price data
+        merged_df = sentiment_df.join(price_data[['Close', 'Volume']], how='left')
+        
+        # Forward fill missing price data (for weekends/holidays)
+        merged_df['Close'] = merged_df['Close'].fillna(method='ffill')
+        merged_df['Volume'] = merged_df['Volume'].fillna(0)
+        
+        print(f"Successfully merged sentiment data with price data for {len(merged_df)} days")
+        return merged_df
+        
+    except Exception as e:
+        print(f"Error fetching price data: {e}")
+        return sentiment_df
 
-    # Calculate Momentum (Derivative)
-    stock_data['Pct_Change'] = stock_data['Close'].pct_change()
-
-    # Merge Sentiment and Price data on the Date index
-    merged = pd.merge(sentiment_df, stock_data[['Close', 'Pct_Change']], left_index=True, right_index=True, how='inner')
-    
-    # Calculate Algo Score (Sentiment - Momentum)
-    merged['Buy_Score'] = merged['Compound_Score'] - merged['Pct_Change']
-    
-    return merged
-
-def calculate_verdict(merged_df):
+def calculate_verdict(df):
     """
-    Generates a 0-10 Buy Score and text explanation based on the LATEST day of data.
+    Calculates the final Buy/Sell score using TIME DECAY.
+    Newer news has a heavier impact on the score.
     """
-    if merged_df.empty:
+    if df.empty:
         return None
 
-    # Get the latest row of data
-    latest = merged_df.iloc[-1]
+    # 1. Sort by Date (Oldest -> Newest)
+    df = df.sort_index(ascending=True)
     
-    # --- SCORING MATH ---
-    # 1. Normalize Sentiment (-1 to 1) -> (0 to 10)
-    sent_score = (latest['Compound_Score'] + 1) * 5
+    # 2. Generate Weights (Linear Decay)
+    # Example: If we have 10 days of data:
+    # Weights will look like: [0.1, 0.2, 0.3 ... 0.9, 1.0]
+    n = len(df)
+    weights = np.linspace(0.2, 1.0, n) # Starts at 0.2 (Oldest), Ends at 1.0 (Newest)
     
-    # 2. Normalize Price Action (Target: Buying the Dip)
-    raw_pct = latest['Pct_Change']
-    # We assume a +/- 5% move is the max "normal" volatility
-    value_score = 5 - (raw_pct * 100)
-    # Clamp score between 0 and 10
-    value_score = max(0, min(10, value_score))
+    # 3. Calculate Weighted Sentiment Score
+    # Formula: Sum(Score * Weight) / Sum(Weights)
+    weighted_sentiment = np.average(df['Compound_Score'], weights=weights)
     
-    # 3. Weighted Average (60% Sentiment, 40% Value)
-    final_score = (sent_score * 0.6) + (value_score * 0.4)
+    # Scale to 0-10 (Sentiment is -1.0 to 1.0)
+    # -1.0 -> 0
+    #  0.0 -> 5
+    # +1.0 -> 10
+    sentiment_score = (weighted_sentiment + 1) * 5
     
-    # --- EXPLANATION GENERATION ---
-    reasons = []
+    # 4. Calculate Price/Value Score with detailed analysis
+    value_score = 5.0 # Neutral placeholder if no price data
+    price_change_pct = 0.0
+    price_reasoning = "No price data available."
     
-    # Explain Sentiment
-    if sent_score >= 7:
-        reasons.append("News sentiment is VERY POSITIVE.")
-    elif sent_score >= 5:
-        reasons.append("News sentiment is NEUTRAL/MILDLY POSITIVE.")
-    else:
-        reasons.append("News sentiment is NEGATIVE.")
+    if 'Close' in df.columns and not df['Close'].isna().all():
+        # Calculate price change over the period
+        first_price = df['Close'].dropna().iloc[0]
+        last_price = df['Close'].dropna().iloc[-1]
+        price_change_pct = ((last_price - first_price) / first_price) * 100
         
-    # Explain Price Action
-    pct_txt = f"{raw_pct*100:.2f}%"
-    if raw_pct <= -0.01:
-        reasons.append(f"Price has dropped {pct_txt}, creating a DISCOUNT.")
-    elif raw_pct >= 0.01:
-        reasons.append(f"Price has rallied {pct_txt}, making it EXPENSIVE.")
+        # Simple "Buy the Dip" logic
+        if price_change_pct < -15:
+            value_score = 9.0
+            price_reasoning = f"Price has dropped {abs(price_change_pct):.2f}%, making it a STRONG BUY opportunity."
+        elif price_change_pct < -5:
+            value_score = 7.0
+            price_reasoning = f"Price has declined {abs(price_change_pct):.2f}%, creating good VALUE."
+        elif price_change_pct > 15:
+            value_score = 2.0
+            price_reasoning = f"Price has rallied {price_change_pct:.2f}%, making it VERY EXPENSIVE."
+        elif price_change_pct > 5:
+            value_score = 3.0
+            price_reasoning = f"Price has rallied {price_change_pct:.2f}%, making it EXPENSIVE."
+        elif -5 <= price_change_pct <= 5:
+            value_score = 6.0
+            price_reasoning = f"Price has moved {price_change_pct:+.2f}%, showing STABLE pricing."
+        else:
+            price_reasoning = f"Price has changed {price_change_pct:+.2f}%."
+
+    # 5. Sentiment reasoning
+    if weighted_sentiment > 0.3:
+        sentiment_reasoning = "News sentiment is VERY POSITIVE."
+    elif weighted_sentiment > 0.1:
+        sentiment_reasoning = "News sentiment is MILDLY POSITIVE."
+    elif weighted_sentiment > -0.1:
+        sentiment_reasoning = "News sentiment is NEUTRAL."
+    elif weighted_sentiment > -0.3:
+        sentiment_reasoning = "News sentiment is MILDLY NEGATIVE."
     else:
-        reasons.append(f"Price is flat ({pct_txt}).")
-        
-    explanation = " ".join(reasons)
+        sentiment_reasoning = "News sentiment is VERY NEGATIVE."
+
+    # 6. Final Weighted Score
+    # 60% Sentiment, 40% Value
+    final_score = (sentiment_score * 0.6) + (value_score * 0.4)
+    
+    # 7. Create detailed explanation
+    explanation = f"{sentiment_reasoning} {price_reasoning}"
     
     return {
-        "Date": latest.name.date(),
-        "Sentiment_Score": round(sent_score, 2),
-        "Value_Score": round(value_score, 2),
-        "Final_Score": round(final_score, 1),
-        "Explanation": explanation
+        'Sentiment_Score': round(sentiment_score, 1),
+        'Value_Score': round(value_score, 1),
+        'Final_Score': round(final_score, 1),
+        'Explanation': explanation
     }

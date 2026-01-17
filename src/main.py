@@ -4,61 +4,44 @@ import analyzer
 import market
 import visualizer
 
-def main():
-    ticker = input("Enter ticker (e.g., TSLA): ").upper()
-
-    print("\nSelect Timeframe:")
-    print("1. 1D  (1 Day)")
-    print("2. 5D  (5 Days)")
-    print("3. 1W  (1 Week)")
-    print("4. 1M  (1 Month)")
-    print("5. YTD (Year-To-Date)")
-    print("6. 1Y  (1 Year)")
-    print("7. MAX (All Available Data)")
+def analyze_stock(ticker, lookback_days):
+    """Analyze a single stock with given parameters"""
+    print(f"\nFetching data for {ticker} over last {lookback_days} days...")
     
-    choice = input("Enter choice (e.g., 5D, 2): ").upper()
-
-    print(f"Fetching data for {ticker}...")
     try:
-        profile_data, raw_data = scraper.scrape_finviz(ticker)
+        # 3. SCRAPE DATA (Dynamic Timeframe)
+        # We tell the scraper exactly how many days we need
+        profile_data, raw_data = scraper.scrape_finviz(ticker, days=lookback_days)
+        
+        # Unpack profile
         company_name, industry, mkt_cap = profile_data
+        
     except Exception as e:
         print(f"Error scraping data: {e}")
         return
     
     if raw_data:
+        # 4. ANALYZE SENTIMENT (AI Mode)
+        print("Analyzing sentiment... (AI running)")
+        
+        # Pass 'ticker' so the AI knows which company to focus on (Context Filter)
         sentiment_df = analyzer.get_sentiment(raw_data, ticker)
         best_news, worst_news = analyzer.get_top_headlines(raw_data, ticker)
         
-        # Filter Dates
-        today = datetime.now().date()
-        cutoff_date = None
-        
-        if choice in ['1', '1D']:
-            cutoff_date = today - timedelta(days=1)
-        elif choice in ['2', '5D']:
-            cutoff_date = today - timedelta(days=5)
-        elif choice in ['3', '1W']:
-            cutoff_date = today - timedelta(days=7)
-        elif choice in ['4', '1M']:
-            cutoff_date = today - timedelta(days=30)
-        elif choice in ['5', 'YTD']:
-            cutoff_date = datetime(today.year, 1, 1).date()
-        elif choice in ['6', '1Y']:
-            cutoff_date = today - timedelta(days=365)
-        elif choice in ['7', 'MAX']:
-            cutoff_date = None
-        else:
-            cutoff_date = None
-            
-        if cutoff_date:
-            print(f"Filtering data since: {cutoff_date}")
-            sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
+        # 5. FILTER DATES LOCALLY
+        # Ensure we don't accidentally include data outside the requested window
+        today = datetime.now()
+        cutoff_date = (today - timedelta(days=lookback_days)).date()
+        sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
 
         if sentiment_df.empty:
-            print("No news found in this date range.")
+            print(f"No relevant news found for {ticker} in the last {lookback_days} days.")
         else:
+            # 6. MARKET DATA & ALGO
             final_df = market.get_financials(ticker, sentiment_df)
+            
+            # 7. PRINT VERDICT
+            # This now uses the "Weighted Average" logic (Recency Bias)
             verdict = market.calculate_verdict(final_df)
             
             if verdict:
@@ -78,9 +61,66 @@ def main():
                 print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")
                 print("="*50 + "\n")
             
+            # 8. PLOT GRAPH
             visualizer.plot_graph(ticker, final_df, profile_data)
     else:
         print("Scraping failed or no data found.")
+
+def main():
+    print("--------------------------------------------------")
+    print("   STOCK IQ: AI SENTIMENT & VALUE ANALYZER")
+    print("--------------------------------------------------")
+    print("Enter 'EXIT' to stop the program")
+    print("--------------------------------------------------")
+    
+    while True:
+        # 1. Inputs
+        ticker = input("\nEnter ticker (e.g., TSLA) or EXIT to exit the program: ").upper().strip()
+        
+        # Check for exit command
+        if ticker == 'EXIT':
+            print("Thank you for using StockIQ! Goodbye!")
+            break
+
+        if not ticker:
+            print("Please enter a valid ticker symbol.")
+            continue
+
+        print("\nSelect Timeframe:")
+        print("1. 1D  (1 Day)")
+        print("2. 5D  (5 Days)")
+        print("3. 1W  (1 Week)")
+        print("4. 1M  (1 Month)")
+        print("5. YTD (Year-To-Date)")
+        print("6. MAX (Max Available Data)") # Combined 1Y/MAX
+        
+        choice = input("Enter choice (e.g., 5D, 2): ").upper().strip()
+
+        # --- 2. CALCULATE LOOKBACK DAYS ---
+        today = datetime.now()
+        
+        if choice in ['1', '1D']:
+            lookback_days = 1
+        elif choice in ['2', '5D']:
+            lookback_days = 5
+        elif choice in ['3', '1W']:
+            lookback_days = 7
+        elif choice in ['4', '1M']:
+            lookback_days = 30
+        elif choice in ['5', 'YTD']:
+            # Calculate days since Jan 1st
+            start_of_year = datetime(today.year, 1, 1)
+            delta = today - start_of_year
+            lookback_days = delta.days
+        elif choice in ['6', 'MAX', '1Y']:
+            # We cap at 365 because Google News rarely provides reliable data older than that
+            lookback_days = 365 
+        else:
+            print("Invalid selection. Defaulting to 1 Month.")
+            lookback_days = 30
+
+        # Analyze the stock
+        analyze_stock(ticker, lookback_days)
 
 if __name__ == "__main__":
     main()
