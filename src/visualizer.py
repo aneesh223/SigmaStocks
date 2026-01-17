@@ -3,24 +3,16 @@ import matplotlib.dates as mdates
 from datetime import datetime
 
 def plot_graph(ticker, merged_df, company_info, timeframe_days=30):
-    """
-    company_info is a tuple: (Name, Industry, Market Cap)
-    timeframe_days: Used to determine appropriate time formatting
-    """
     name, industry, mkt_cap = company_info
     
-    fig, ax1 = plt.subplots(figsize=(12, 7)) # Increased height for info text
+    fig, ax1 = plt.subplots(figsize=(12, 7))
 
-    # Bar Chart - use Compound_Score instead of Buy_Score
     score_column = 'Compound_Score' if 'Compound_Score' in merged_df.columns else 'Buy_Score'
     colors = ['green' if x > 0 else 'red' for x in merged_df[score_column]]
     
-    # Adjust bar width based on timeframe
     if timeframe_days <= 1:
-        # Narrower bars for hourly data
-        bar_width = 0.02  # About 30 minutes width
+        bar_width = 0.02
     else:
-        # Default width for daily data (5 days and longer)
         bar_width = 0.8
     
     ax1.bar(merged_df.index, merged_df[score_column], color=colors, alpha=0.6, 
@@ -29,37 +21,29 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30):
     ax1.set_ylabel('Sentiment Score', color='green')
     ax1.axhline(0, color='grey', linewidth=0.8, linestyle='--')
 
-    # Format x-axis based on timeframe
     if timeframe_days <= 1:
-        # Hourly format for 1 day
         ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
         ax1.xaxis.set_major_locator(mdates.HourLocator(interval=2))
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
     else:
-        # Daily format for 5 days and longer
         ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
         ax1.xaxis.set_major_locator(mdates.DayLocator(interval=max(1, timeframe_days//10)))
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
 
-    # Line Chart - only if Close price data exists and has valid data
     if 'Close' in merged_df.columns and not merged_df['Close'].isna().all():
         ax2 = ax1.twinx()
-        # Filter out NaN values for cleaner line plotting
         price_data = merged_df['Close'].dropna()
         if not price_data.empty:
             if timeframe_days <= 1:
-                # For 1-day data, use thicker line and markers for better visibility
                 ax2.plot(price_data.index, price_data.values, color='blue', linewidth=3, 
                         linestyle='-', label='Stock Price', marker='o', markersize=4, alpha=0.8)
             else:
-                # For longer timeframes, use standard line
                 ax2.plot(price_data.index, price_data.values, color='black', linewidth=2, 
                         linestyle='-', label='Stock Price', marker='o', markersize=3)
             
             ax2.set_ylabel('Stock Price ($)', color='blue' if timeframe_days <= 1 else 'black')
             ax2.tick_params(axis='y', labelcolor='blue' if timeframe_days <= 1 else 'black')
             
-            # Add legend to distinguish the two y-axes
             lines1, labels1 = ax1.get_legend_handles_labels()
             lines2, labels2 = ax2.get_legend_handles_labels()
             ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
@@ -70,7 +54,6 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30):
     else:
         print("No Close price column found or all values are NaN")
 
-    # Title
     if timeframe_days <= 1:
         title_suffix = "Hourly Sentiment Analysis"
     else:
@@ -78,16 +61,12 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30):
         
     plt.title(f'{name} ({ticker}) - {title_suffix}')
     
-    # --- NEW: ADD INFO BOX BELOW CHART ---
-    # We use figtext (figure coordinates: 0,0 is bottom-left, 1,1 is top-right)
     info_text = f"Industry: {industry}   |   Market Cap: {mkt_cap}"
     
     plt.figtext(0.5, 0.02, info_text, ha="center", fontsize=10, 
                 bbox={"facecolor":"orange", "alpha":0.2, "pad":5})
     
-    # Adjust layout to make room for the text at the bottom
     plt.subplots_adjust(bottom=0.15)
-    # -------------------------------------
     
     plt.tight_layout()
     plt.show()
