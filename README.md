@@ -1,2 +1,2 @@
 # StockIQ
-A program that scrapes data from the internet and analyzes stocks
+A program that scrapes stock sentiment data from the internet and analyzes stocks
