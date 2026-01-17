@@ -1,6 +1,7 @@
 requests
-bs4
+beautifulsoup4
 pandas
 nltk
 matplotlib
 yfinance
+pytz
