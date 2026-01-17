@@ -1,2 +1,2 @@
 # StockIQ
-A program that scrapes data from FinViz and analyzes stocks
+A program that scrapes data from the internet and analyzes stocks

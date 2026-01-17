@@ -7,7 +7,7 @@ import visualizer
 def main():
     ticker = input("Enter ticker (e.g., TSLA): ").upper()
 
-    print("\nSelect Industry Standard Timeframe:")
+    print("\nSelect Timeframe:")
     print("1. 1D  (1 Day)")
     print("2. 5D  (5 Days)")
     print("3. 1W  (1 Week)")
@@ -27,12 +27,8 @@ def main():
         return
     
     if raw_data:
-        sentiment_df = analyzer.get_sentiment(raw_data)
-        
-        # --- NEW: GET EVIDENCE HEADLINES ---
-        # We look at ALL data to find the most impactful headlines
-        best_news, worst_news = analyzer.get_top_headlines(raw_data)
-        # -----------------------------------
+        sentiment_df = analyzer.get_sentiment(raw_data, ticker)
+        best_news, worst_news = analyzer.get_top_headlines(raw_data, ticker)
         
         # Filter Dates
         today = datetime.now().date()
