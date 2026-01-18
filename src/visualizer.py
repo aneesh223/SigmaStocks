@@ -37,16 +37,26 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
         gs = fig.add_gridspec(2, 1, height_ratios=[4, 0.5], hspace=0.2)
         ax1 = fig.add_subplot(gs[0])
 
-    # Main sentiment plot with cleaner styling
+    # Main sentiment plot with clean line chart
     score_column = 'Compound_Score' if 'Compound_Score' in merged_df.columns else 'Buy_Score'
     
-    # Create sentiment bars with better colors
-    colors = ['#2E8B57' if x > 0.1 else '#DC143C' if x < -0.1 else '#708090' for x in merged_df[score_column]]
-    
+    # Define bar_width for article breakdown subplot
     bar_width = 0.02 if timeframe_days <= 1 else 0.8
     
-    ax1.bar(merged_df.index, merged_df[score_column], color=colors, alpha=0.7, 
-            width=bar_width, edgecolor='white', linewidth=0.5, label='Overall Sentiment')
+    # Create sentiment line with color based on sentiment
+    sentiment_data = merged_df[score_column].dropna()
+    if not sentiment_data.empty:
+        # Color the line based on overall sentiment trend
+        avg_sentiment = sentiment_data.mean()
+        if avg_sentiment > 0.1:
+            line_color = '#2E8B57'  # Green for positive
+        elif avg_sentiment < -0.1:
+            line_color = '#DC143C'  # Red for negative
+        else:
+            line_color = '#708090'  # Gray for neutral
+        
+        ax1.plot(sentiment_data.index, sentiment_data.values, color=line_color, linewidth=2.5, 
+                label='Overall Sentiment', marker='o', markersize=4, alpha=0.8)
 
     # Style the main plot
     ax1.set_ylabel('Sentiment Score', fontsize=12, fontweight='bold')
@@ -54,7 +64,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     ax1.set_facecolor('#FAFAFA')
     
-    # Add legend for sentiment bars
+    # Add legend for sentiment line
     ax1.legend(loc='upper left', frameon=True, fancybox=True, shadow=True, fontsize=10)
 
     # Format x-axis
@@ -133,9 +143,13 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     fig.text(0.5, 0.02, info_text, ha="center", fontsize=11, 
              bbox={"facecolor":"#E6E6FA", "alpha":0.8, "pad":8, "boxstyle":"round,pad=0.5"})
     
-    # Adjust layout
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.08)
+    # Adjust layout with manual spacing to avoid tight_layout warnings
+    if show_breakdown:
+        # Three subplot layout
+        plt.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.12, hspace=0.4)
+    else:
+        # Two subplot layout  
+        plt.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.12, hspace=0.3)
     
     if save_plot:
         # Save plot instead of showing it

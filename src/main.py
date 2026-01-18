@@ -37,9 +37,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
         if sentiment_df.empty:
             print(f"No relevant news found for {ticker} in the last {lookback_days} days.")
         else:
-            final_df = market.get_financials(ticker, sentiment_df, lookback_days)
-            
-            verdict = market.calculate_verdict(final_df, strategy_mode)
+            verdict = market.calculate_verdict(ticker, sentiment_df, strategy_mode.lower())
             
             if verdict:
                 print("\n" + "="*50)
@@ -48,29 +46,19 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
                 print(f"Industry:   {industry}")
                 print(f"Market Cap: {mkt_cap}")
                 print("-" * 50)
-                print(f"Strategy:           {strategy_mode}")
-                print(f"Overall Sentiment:  {verdict['Sentiment_Score']}/10")
-                
-                # Only show categories with sufficient data
-                valid_categories = verdict.get('Valid_Categories', [])
-                if 'Primary' in valid_categories:
-                    print(f"� Primary Sources:  {verdict['Primary_Score']}/10")
-                if 'Institutional' in valid_categories:
-                    print(f"🏛️  Institutional:    {verdict['Institutional_Score']}/10")
-                if 'Aggregator' in valid_categories:
-                    print(f"📈 Aggregators:      {verdict['Aggregator_Score']}/10")
-                if 'Entertainment' in valid_categories:
-                    print(f"📺 Entertainment:    {verdict['Entertainment_Score']}/10")
-                
-                print(f"Price Value:        {verdict['Value_Score']}/10")
+                print(f"Strategy:           {verdict['Strategy']}")
+                print(f"Sentiment Health:   {verdict['Sentiment_Health']}/10")
+                print(f"Technical Score:    {verdict['Technical_Score']}/10")
                 print("-" * 50)
-                print(f"FINAL BUY SCORE:  {verdict['Final_Score']}/10")
+                print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']}/10")
                 print(f"\nREASONING:\n{verdict['Explanation']}")
                 print("-" * 50)
                 print(f"TOP POSITIVE NEWS:\n>> {best_news}")
                 print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")
                 print("="*50 + "\n")
             
+            # Get data for visualization
+            final_df = market.get_visualization_data(ticker, sentiment_df, lookback_days)
             visualizer.plot_graph(ticker, final_df, profile_data, lookback_days, strategy_mode)
     else:
         print("Scraping failed or no data found.")
@@ -124,21 +112,18 @@ def main():
             lookback_days = 30
 
         print("\nSelect Investment Strategy:")
-        print("1. VALUE    (Buy dips - contrarian approach)")
-        print("2. MOMENTUM (Follow trends - derivative-based)")
-        print("3. BALANCED (Combine both approaches)")
+        print("1. VALUE    (Buy the Dip - Z-Score based)")
+        print("2. MOMENTUM (Swing Trading - MACD/RSI based)")
         
-        strategy_choice = input("Enter strategy choice (1-3): ").strip()
+        strategy_choice = input("Enter strategy choice (1-2): ").strip()
         
         if strategy_choice == '1':
             strategy_mode = "VALUE"
         elif strategy_choice == '2':
             strategy_mode = "MOMENTUM"
-        elif strategy_choice == '3':
-            strategy_mode = "BALANCED"
         else:
-            print("Invalid selection. Defaulting to BALANCED.")
-            strategy_mode = "BALANCED"
+            print("Invalid selection. Defaulting to VALUE.")
+            strategy_mode = "VALUE"
 
         analyze_stock(ticker, lookback_days, strategy_mode)
 

@@ -3,21 +3,354 @@ import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
 
+def get_stock_data(ticker, period="1y"):
+    """
+    Fetch stock data using yfinance
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        period (str): Data period (1y, 6mo, 3mo, etc.)
+    
+    Returns:
+        pd.DataFrame: Stock price data with OHLCV
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(period=period)
+        
+        if data.empty:
+            print(f"No stock data found for {ticker}")
+            return pd.DataFrame()
+        
+        print(f"Fetched {len(data)} days of stock data for {ticker}")
+        return data
+    
+    except Exception as e:
+        print(f"Error fetching stock data for {ticker}: {e}")
+        return pd.DataFrame()
+
+def calculate_z_score(prices, window=50):
+    """
+    Calculate Z-Score based on moving average and standard deviation
+    
+    Args:
+        prices (pd.Series): Price series
+        window (int): Rolling window for calculation
+    
+    Returns:
+        float: Current Z-Score
+    """
+    if len(prices) < window:
+        return 0.0
+    
+    # Calculate rolling mean and std
+    rolling_mean = prices.rolling(window=window).mean()
+    rolling_std = prices.rolling(window=window).std()
+    
+    # Calculate Z-Score for the most recent price
+    current_price = prices.iloc[-1]
+    current_mean = rolling_mean.iloc[-1]
+    current_std = rolling_std.iloc[-1]
+    
+    if current_std == 0:
+        return 0.0
+    
+    z_score = (current_price - current_mean) / current_std
+    return z_score
+
+def calculate_macd(prices, fast=12, slow=26, signal=9):
+    """
+    Calculate MACD (Moving Average Convergence Divergence)
+    
+    Args:
+        prices (pd.Series): Price series
+        fast (int): Fast EMA period
+        slow (int): Slow EMA period  
+        signal (int): Signal line EMA period
+    
+    Returns:
+        tuple: (macd_line, signal_line, histogram, bullish_crossover)
+    """
+    if len(prices) < slow + signal:
+        return 0.0, 0.0, 0.0, False
+    
+    # Calculate EMAs
+    ema_fast = prices.ewm(span=fast).mean()
+    ema_slow = prices.ewm(span=slow).mean()
+    
+    # MACD Line = Fast EMA - Slow EMA
+    macd_line = ema_fast - ema_slow
+    
+    # Signal Line = 9-day EMA of MACD Line
+    signal_line = macd_line.ewm(span=signal).mean()
+    
+    # Histogram = MACD - Signal
+    histogram = macd_line - signal_line
+    
+    # Check for bullish crossover (MACD crosses above Signal)
+    bullish_crossover = False
+    if len(macd_line) >= 2 and len(signal_line) >= 2:
+        prev_macd = macd_line.iloc[-2]
+        prev_signal = signal_line.iloc[-2]
+        curr_macd = macd_line.iloc[-1]
+        curr_signal = signal_line.iloc[-1]
+        
+        # Bullish crossover: MACD was below signal, now above
+        bullish_crossover = (prev_macd <= prev_signal) and (curr_macd > curr_signal)
+    
+    return curr_macd, curr_signal, histogram.iloc[-1], bullish_crossover
+
+def calculate_rsi(prices, window=14):
+    """
+    Calculate RSI (Relative Strength Index)
+    
+    Args:
+        prices (pd.Series): Price series
+        window (int): RSI calculation window
+    
+    Returns:
+        float: Current RSI value
+    """
+    if len(prices) < window + 1:
+        return 50.0  # Neutral RSI
+    
+    # Calculate price changes
+    delta = prices.diff()
+    
+    # Separate gains and losses
+    gains = delta.where(delta > 0, 0)
+    losses = -delta.where(delta < 0, 0)
+    
+    # Calculate average gains and losses
+    avg_gains = gains.rolling(window=window).mean()
+    avg_losses = losses.rolling(window=window).mean()
+    
+    # Calculate RS and RSI
+    rs = avg_gains / avg_losses
+    rsi = 100 - (100 / (1 + rs))
+    
+    return rsi.iloc[-1]
+
+def calculate_value_score(z_score):
+    """
+    Calculate VALUE strategy score based on Z-Score
+    
+    Args:
+        z_score (float): Current Z-Score
+    
+    Returns:
+        tuple: (technical_score, explanation)
+    """
+    # VALUE Strategy: Look for oversold conditions (Z < -2.0)
+    if z_score <= -2.5:
+        technical_score = 9.0
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - DEEP VALUE opportunity."
+    elif z_score <= -2.0:
+        technical_score = 8.0
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - Strong BUY signal."
+    elif z_score <= -1.5:
+        technical_score = 7.0
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - Good VALUE entry."
+    elif z_score <= -1.0:
+        technical_score = 6.0
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - Moderate VALUE."
+    elif z_score <= 0.5:
+        technical_score = 5.0
+        explanation = f"Stock is near mean (Z-Score: {z_score:.1f}) - NEUTRAL valuation."
+    elif z_score <= 1.5:
+        technical_score = 4.0
+        explanation = f"Stock is {z_score:.1f} standard deviations above mean - Slightly EXPENSIVE."
+    elif z_score <= 2.0:
+        technical_score = 3.0
+        explanation = f"Stock is {z_score:.1f} standard deviations above mean - EXPENSIVE."
+    else:
+        technical_score = 2.0
+        explanation = f"Stock is {z_score:.1f} standard deviations above mean - VERY EXPENSIVE."
+    
+    return technical_score, explanation
+
+def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossover, rsi):
+    """
+    Calculate MOMENTUM strategy score based on MACD and RSI
+    
+    Args:
+        macd_line (float): Current MACD value
+        signal_line (float): Current Signal line value
+        histogram (float): MACD histogram value
+        bullish_crossover (bool): Whether bullish crossover occurred
+        rsi (float): Current RSI value
+    
+    Returns:
+        tuple: (technical_score, explanation)
+    """
+    # Base score starts at 5 (neutral)
+    technical_score = 5.0
+    explanations = []
+    
+    # MACD Analysis
+    if bullish_crossover:
+        if rsi < 70:  # Not overbought
+            technical_score += 3.0
+            explanations.append("MACD bullish crossover detected")
+        else:
+            technical_score += 1.0
+            explanations.append("MACD bullish crossover but RSI overbought")
+    elif macd_line > signal_line:
+        if histogram > 0:
+            technical_score += 2.0
+            explanations.append("MACD above signal with positive momentum")
+        else:
+            technical_score += 1.0
+            explanations.append("MACD above signal but weakening")
+    else:
+        if histogram < 0:
+            technical_score -= 1.0
+            explanations.append("MACD below signal with negative momentum")
+    
+    # RSI Analysis
+    if rsi < 30:
+        technical_score += 1.0
+        explanations.append(f"RSI oversold at {rsi:.0f}")
+    elif rsi > 70:
+        technical_score -= 1.0
+        explanations.append(f"RSI overbought at {rsi:.0f}")
+    else:
+        explanations.append(f"RSI neutral at {rsi:.0f}")
+    
+    # Cap the score between 1-10
+    technical_score = max(1.0, min(10.0, technical_score))
+    
+    explanation = ". ".join(explanations) + "."
+    
+    return technical_score, explanation
+
+def calculate_verdict(ticker, sentiment_df, strategy="value"):
+    """
+    Calculate trading verdict based on technical analysis and sentiment
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        sentiment_df (pd.DataFrame): Sentiment data from analyzer
+        strategy (str): Trading strategy - 'value' or 'momentum'
+    
+    Returns:
+        dict: Trading verdict with scores and explanation
+    """
+    if sentiment_df.empty:
+        return {
+            'Sentiment_Health': 5.0,
+            'Technical_Score': 5.0,
+            'Final_Buy_Score': 5.0,
+            'Explanation': "No sentiment data available for analysis."
+        }
+    
+    # Get stock data
+    stock_data = get_stock_data(ticker, period="1y")
+    if stock_data.empty:
+        return {
+            'Sentiment_Health': 5.0,
+            'Technical_Score': 5.0,
+            'Final_Buy_Score': 5.0,
+            'Explanation': "No stock price data available for technical analysis."
+        }
+    
+    # Calculate sentiment health (convert from -1 to 1 scale to 0 to 10 scale)
+    avg_sentiment = sentiment_df['Compound_Score'].mean()
+    sentiment_health = (avg_sentiment + 1) * 5  # Convert to 0-10 scale
+    
+    # Get closing prices
+    prices = stock_data['Close']
+    
+    # Calculate technical indicators based on strategy
+    if strategy.lower() == "momentum":
+        # MOMENTUM Strategy
+        macd_line, signal_line, histogram, bullish_crossover = calculate_macd(prices)
+        rsi = calculate_rsi(prices)
+        
+        technical_score, technical_explanation = calculate_momentum_score(
+            macd_line, signal_line, histogram, bullish_crossover, rsi
+        )
+        
+        strategy_name = "MOMENTUM"
+        
+    else:
+        # VALUE Strategy (default)
+        z_score = calculate_z_score(prices, window=50)
+        technical_score, technical_explanation = calculate_value_score(z_score)
+        
+        strategy_name = "VALUE"
+    
+    # Apply sentiment penalty for negative sentiment (falling knife protection)
+    sentiment_penalty = 1.0
+    if avg_sentiment < -0.5:
+        sentiment_penalty = 0.5  # 50% penalty for very negative sentiment
+        penalty_explanation = " FALLING KNIFE WARNING: Negative sentiment reduces score by 50%."
+    else:
+        penalty_explanation = ""
+    
+    # Calculate final score (60% technical, 40% sentiment, with penalty)
+    final_score = ((technical_score * 0.6) + (sentiment_health * 0.4)) * sentiment_penalty
+    final_score = max(1.0, min(10.0, final_score))  # Cap between 1-10
+    
+    # Build explanation
+    if avg_sentiment > 0.3:
+        sentiment_description = "VERY POSITIVE"
+    elif avg_sentiment > 0.1:
+        sentiment_description = "MILDLY POSITIVE"
+    elif avg_sentiment > -0.1:
+        sentiment_description = "NEUTRAL"
+    elif avg_sentiment > -0.3:
+        sentiment_description = "MILDLY NEGATIVE"
+    else:
+        sentiment_description = "VERY NEGATIVE"
+    
+    explanation = f"{strategy_name} Strategy: {technical_explanation} Sentiment is {sentiment_description}.{penalty_explanation}"
+    
+    return {
+        'Sentiment_Health': round(sentiment_health, 1),
+        'Technical_Score': round(technical_score, 1),
+        'Final_Buy_Score': round(final_score, 1),
+        'Explanation': explanation,
+        'Strategy': strategy_name
+    }
+
+# Legacy function for backward compatibility
 def get_financials(ticker, sentiment_df, timeframe_days=30):
+    """
+    Legacy function - now just returns sentiment_df for compatibility
+    """
+    return sentiment_df
+
+def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
+    """
+    Get combined sentiment and price data for visualization
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        sentiment_df (pd.DataFrame): Sentiment data from analyzer
+        timeframe_days (int): Number of days to look back
+    
+    Returns:
+        pd.DataFrame: Combined sentiment and price data for plotting
+    """
     if sentiment_df.empty:
         return sentiment_df
     
     try:
+        # Get the date range from sentiment data
         start_date = sentiment_df.index.min()
         end_date = sentiment_df.index.max()
         
+        # Handle different index types
         if hasattr(start_date, 'date'):
             start_date = start_date.date()
         if hasattr(end_date, 'date'):
             end_date = end_date.date()
             
+        # Add buffer for price data
         end_date = end_date + timedelta(days=1)
         
+        # Determine interval based on timeframe
         if timeframe_days <= 1:
             interval = "1h"
             period = "2d"
@@ -25,6 +358,7 @@ def get_financials(ticker, sentiment_df, timeframe_days=30):
             interval = "1d"
             period = None
         
+        # Get stock data
         stock = yf.Ticker(ticker)
         
         if period:
@@ -42,12 +376,14 @@ def get_financials(ticker, sentiment_df, timeframe_days=30):
             print("No price data found for the given date range")
             return sentiment_df
         
+        # Filter price data for intraday if needed
         if timeframe_days <= 1 and period:
             start_timestamp = pd.Timestamp(start_date).tz_localize('UTC')
             if price_data.index.tz is not None:
                 start_timestamp = start_timestamp.tz_convert(price_data.index.tz)
             price_data = price_data[price_data.index >= start_timestamp]
         
+        # Resample price data to match sentiment frequency
         if timeframe_days <= 1 and interval == "1h":
             price_resampled = price_data.resample('h').last()
         else:
@@ -55,18 +391,13 @@ def get_financials(ticker, sentiment_df, timeframe_days=30):
             price_resampled.index = price_resampled.index.date
         
         print(f"Original price data: {len(price_data)} records from {price_data.index.min()} to {price_data.index.max()}")
-        print(f"Price data timezone: {price_data.index.tz}")
-        print(f"Sentiment data timezone: {getattr(sentiment_df.index, 'tz', 'No timezone')}")
         print(f"Resampled price data: {len(price_resampled)} records")
         print(f"Sentiment data: {len(sentiment_df)} records from {sentiment_df.index.min()} to {sentiment_df.index.max()}")
         
+        # Merge sentiment and price data
         merged_df = sentiment_df.join(price_resampled[['Close', 'Volume']], how='left')
         
-        print(f"Price data shape: {price_resampled.shape}")
-        print(f"Sentiment data shape: {sentiment_df.shape}")
-        print(f"Merged data shape: {merged_df.shape}")
-        print(f"Close price NaN count: {merged_df['Close'].isna().sum()}")
-        
+        # Forward fill missing prices
         merged_df['Close'] = merged_df['Close'].ffill()
         merged_df['Volume'] = merged_df['Volume'].fillna(0)
         
@@ -74,242 +405,5 @@ def get_financials(ticker, sentiment_df, timeframe_days=30):
         return merged_df
         
     except Exception as e:
-        print(f"Error fetching price data: {e}")
+        print(f"Error fetching price data for visualization: {e}")
         return sentiment_df
-
-def calculate_price_derivative(price_series, window=3):
-    """Calculate the derivative (slope) of price movement over a window"""
-    if len(price_series) < window:
-        return 0.0
-    
-    # Use the last 'window' prices to calculate slope
-    recent_prices = price_series.dropna().tail(window)
-    if len(recent_prices) < 2:
-        return 0.0
-    
-    # Calculate slope using linear regression over the window
-    x = np.arange(len(recent_prices))
-    y = recent_prices.values
-    
-    # Simple slope calculation: (y2 - y1) / (x2 - x1)
-    slope = (y[-1] - y[0]) / (len(y) - 1) if len(y) > 1 else 0
-    
-    # Convert to percentage change per day
-    avg_price = np.mean(y)
-    derivative_pct = (slope / avg_price) * 100 if avg_price > 0 else 0
-    
-    return derivative_pct
-
-def calculate_value_score(price_change_pct):
-    """Calculate value score based on total price change (buy dips strategy)"""
-    if price_change_pct < -15:
-        return 9.0, f"Price has dropped {abs(price_change_pct):.2f}%, making it a STRONG BUY opportunity."
-    elif price_change_pct < -5:
-        return 7.0, f"Price has declined {abs(price_change_pct):.2f}%, creating good VALUE."
-    elif price_change_pct > 15:
-        return 2.0, f"Price has rallied {price_change_pct:.2f}%, making it VERY EXPENSIVE."
-    elif price_change_pct > 5:
-        return 3.0, f"Price has rallied {price_change_pct:.2f}%, making it EXPENSIVE."
-    elif -5 <= price_change_pct <= 5:
-        return 6.0, f"Price has moved {price_change_pct:+.2f}%, showing STABLE pricing."
-    else:
-        return 5.0, f"Price has changed {price_change_pct:+.2f}%."
-
-def calculate_momentum_score(derivative_pct):
-    """Calculate momentum score based on price derivative (trend following)"""
-    if derivative_pct > 3:
-        return 9.0, f"Strong UPWARD momentum ({derivative_pct:+.2f}%/day) - RIDE THE TREND."
-    elif derivative_pct > 1:
-        return 7.0, f"Positive momentum ({derivative_pct:+.2f}%/day) - GOOD ENTRY POINT."
-    elif derivative_pct > -1:
-        return 5.0, f"Sideways momentum ({derivative_pct:+.2f}%/day) - NEUTRAL TREND."
-    elif derivative_pct > -3:
-        return 3.0, f"Negative momentum ({derivative_pct:+.2f}%/day) - DECLINING TREND."
-    else:
-        return 1.0, f"Strong DOWNWARD momentum ({derivative_pct:+.2f}%/day) - AVOID."
-
-def calculate_verdict(df, strategy_mode="BALANCED"):
-    if df.empty:
-        return None
-
-    df = df.sort_index(ascending=True)
-    
-    n = len(df)
-    weights = np.linspace(0.2, 1.0, n)
-    
-    # Calculate weighted sentiment for overall, insider, and consumer
-    weighted_sentiment = np.average(df['Compound_Score'], weights=weights)
-    
-def calculate_verdict(df, strategy_mode="BALANCED"):
-    if df.empty:
-        return None
-
-    df = df.sort_index(ascending=True)
-    
-    n = len(df)
-    weights = np.linspace(0.2, 1.0, n)
-    
-    # Calculate weighted sentiment for overall
-    weighted_sentiment = np.average(df['Compound_Score'], weights=weights)
-    
-    # Calculate separate sentiment for each source tier with minimum article thresholds
-    MIN_ARTICLES_THRESHOLD = 3  # Minimum articles needed to show a category
-    
-    primary_sentiment = 0.0
-    institutional_sentiment = 0.0
-    aggregator_sentiment = 0.0
-    entertainment_sentiment = 0.0
-    
-    # Track which categories have sufficient data
-    valid_categories = {}
-    
-    if 'Primary_Sentiment' in df.columns and not df['Primary_Sentiment'].isna().all():
-        primary_mask = ~df['Primary_Sentiment'].isna()
-        primary_article_count = df['Primary_Count'].sum() if 'Primary_Count' in df.columns else 0
-        if primary_mask.any() and primary_article_count >= MIN_ARTICLES_THRESHOLD:
-            primary_sentiment = np.average(df.loc[primary_mask, 'Primary_Sentiment'], 
-                                         weights=weights[primary_mask])
-            valid_categories['Primary'] = (primary_sentiment, primary_article_count)
-    
-    if 'Institutional_Sentiment' in df.columns and not df['Institutional_Sentiment'].isna().all():
-        institutional_mask = ~df['Institutional_Sentiment'].isna()
-        institutional_article_count = df['Institutional_Count'].sum() if 'Institutional_Count' in df.columns else 0
-        if institutional_mask.any() and institutional_article_count >= MIN_ARTICLES_THRESHOLD:
-            institutional_sentiment = np.average(df.loc[institutional_mask, 'Institutional_Sentiment'], 
-                                               weights=weights[institutional_mask])
-            valid_categories['Institutional'] = (institutional_sentiment, institutional_article_count)
-    
-    if 'Aggregator_Sentiment' in df.columns and not df['Aggregator_Sentiment'].isna().all():
-        aggregator_mask = ~df['Aggregator_Sentiment'].isna()
-        aggregator_article_count = df['Aggregator_Count'].sum() if 'Aggregator_Count' in df.columns else 0
-        if aggregator_mask.any() and aggregator_article_count >= MIN_ARTICLES_THRESHOLD:
-            aggregator_sentiment = np.average(df.loc[aggregator_mask, 'Aggregator_Sentiment'], 
-                                            weights=weights[aggregator_mask])
-            valid_categories['Aggregator'] = (aggregator_sentiment, aggregator_article_count)
-    
-    if 'Entertainment_Sentiment' in df.columns and not df['Entertainment_Sentiment'].isna().all():
-        entertainment_mask = ~df['Entertainment_Sentiment'].isna()
-        entertainment_article_count = df['Entertainment_Count'].sum() if 'Entertainment_Count' in df.columns else 0
-        if entertainment_mask.any() and entertainment_article_count >= MIN_ARTICLES_THRESHOLD:
-            entertainment_sentiment = np.average(df.loc[entertainment_mask, 'Entertainment_Sentiment'], 
-                                               weights=weights[entertainment_mask])
-            valid_categories['Entertainment'] = (entertainment_sentiment, entertainment_article_count)
-    
-    # Convert to 0-10 scale only for valid categories
-    sentiment_score = (weighted_sentiment + 1) * 5
-    
-    # Only calculate scores for categories with sufficient data
-    category_scores = {}
-    if 'Primary' in valid_categories:
-        category_scores['Primary_Score'] = (valid_categories['Primary'][0] + 1) * 5
-    if 'Institutional' in valid_categories:
-        category_scores['Institutional_Score'] = (valid_categories['Institutional'][0] + 1) * 5
-    if 'Aggregator' in valid_categories:
-        category_scores['Aggregator_Score'] = (valid_categories['Aggregator'][0] + 1) * 5
-    if 'Entertainment' in valid_categories:
-        category_scores['Entertainment_Score'] = (valid_categories['Entertainment'][0] + 1) * 5
-    
-    value_score = 5.0
-    momentum_score = 5.0
-    price_change_pct = 0.0
-    derivative_pct = 0.0
-    price_reasoning = "No price data available."
-    
-    if 'Close' in df.columns and not df['Close'].isna().all():
-        prices = df['Close'].dropna()
-        first_price = prices.iloc[0]
-        last_price = prices.iloc[-1]
-        
-        # Calculate total price change (for value strategy)
-        price_change_pct = ((last_price - first_price) / first_price) * 100
-        
-        # Calculate price derivative (for momentum strategy)
-        derivative_pct = calculate_price_derivative(prices, window=min(3, len(prices)))
-        
-        # Get scores based on strategy
-        if strategy_mode == "VALUE":
-            value_score, price_reasoning = calculate_value_score(price_change_pct)
-            final_score = (sentiment_score * 0.6) + (value_score * 0.4)
-            
-        elif strategy_mode == "MOMENTUM":
-            momentum_score, price_reasoning = calculate_momentum_score(derivative_pct)
-            final_score = (sentiment_score * 0.6) + (momentum_score * 0.4)
-            
-        else:  # BALANCED
-            value_score, value_reason = calculate_value_score(price_change_pct)
-            momentum_score, momentum_reason = calculate_momentum_score(derivative_pct)
-            
-            # Combine both approaches
-            combined_price_score = (value_score * 0.5) + (momentum_score * 0.5)
-            final_score = (sentiment_score * 0.6) + (combined_price_score * 0.4)
-            
-            price_reasoning = f"VALUE: {value_reason} MOMENTUM: {momentum_reason}"
-
-    else:
-        # No price data available - use default scoring
-        if strategy_mode == "MOMENTUM":
-            final_score = sentiment_score * 0.6 + 5.0 * 0.4
-        else:
-            final_score = sentiment_score * 0.6 + 5.0 * 0.4
-
-    if weighted_sentiment > 0.3:
-        sentiment_reasoning = "News sentiment is VERY POSITIVE."
-    elif weighted_sentiment > 0.1:
-        sentiment_reasoning = "News sentiment is MILDLY POSITIVE."
-    elif weighted_sentiment > -0.1:
-        sentiment_reasoning = "News sentiment is NEUTRAL."
-    elif weighted_sentiment > -0.3:
-        sentiment_reasoning = "News sentiment is MILDLY NEGATIVE."
-    else:
-        sentiment_reasoning = "News sentiment is VERY NEGATIVE."
-
-    # Add source tier analysis - only for categories with sufficient data
-    sentiment_breakdown = ""
-    
-    if len(valid_categories) >= 2:
-        # Sort by sentiment value
-        sorted_categories = sorted(valid_categories.items(), key=lambda x: x[1][0], reverse=True)
-        highest_name, (highest_sentiment, highest_count) = sorted_categories[0]
-        lowest_name, (lowest_sentiment, lowest_count) = sorted_categories[-1]
-        
-        sentiment_diff = highest_sentiment - lowest_sentiment
-        
-        if sentiment_diff > 0.3:
-            sentiment_breakdown = f" {highest_name.upper()} sources ({highest_count} articles) much more bullish than {lowest_name.upper()} ({lowest_count} articles)."
-        elif sentiment_diff > 0.15:
-            sentiment_breakdown = f" {highest_name.upper()} sources more optimistic than {lowest_name.upper()}."
-        else:
-            category_names = [name.upper() for name in valid_categories.keys()]
-            sentiment_breakdown = f" {', '.join(category_names)} sources showing ALIGNED sentiment."
-    
-    elif len(valid_categories) == 1:
-        category_name, (_, count) = list(valid_categories.items())[0]
-        sentiment_breakdown = f" Coverage primarily from {category_name.upper()} sources ({count} articles)."
-    
-    else:
-        sentiment_breakdown = " Insufficient reliable news coverage for analysis."
-
-    final_score = final_score if 'final_score' in locals() else (sentiment_score * 0.6) + (value_score * 0.4)
-    
-    explanation = f"{sentiment_reasoning}{sentiment_breakdown} {price_reasoning}"
-    
-    # Return appropriate score based on strategy
-    if strategy_mode == "MOMENTUM":
-        display_score = momentum_score
-    else:
-        display_score = value_score
-    
-    # Build return dictionary with only valid categories
-    result = {
-        'Sentiment_Score': round(sentiment_score, 1),
-        'Value_Score': round(display_score, 1),
-        'Final_Score': round(final_score, 1),
-        'Explanation': explanation,
-        'Valid_Categories': list(valid_categories.keys())  # Track which categories are valid
-    }
-    
-    # Add scores only for valid categories
-    for category, score in category_scores.items():
-        result[category] = round(score, 1)
-    
-    return result

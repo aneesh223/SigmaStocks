@@ -9,7 +9,6 @@ else:
 import yfinance as yf
 from gnews import GNews
 from datetime import datetime, timedelta
-import pandas as pd
 import pytz
 
 def get_profile_data(ticker):
@@ -42,13 +41,6 @@ def scrape_gnews(ticker, days=30):
     parsed = []
     
     cutoff_date = datetime.now(pytz.utc) - timedelta(days=days + 2)
-    
-    if days <= 7:
-        g_period = '7d'
-    elif days <= 31:
-        g_period = '1m'
-    else:
-        g_period = '1y'
 
     try:
         google_news = GNews(language='en', country='US')
