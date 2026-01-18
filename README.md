@@ -110,7 +110,7 @@ A sophisticated stock analysis tool that combines advanced technical analysis wi
 
 ## 📝 License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the GNU GPLv3 License - see the LICENSE file for details.
 
 ---
 
