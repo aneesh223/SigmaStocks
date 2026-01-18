@@ -30,11 +30,11 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     
     # Create subplots based on available data
     if show_breakdown:
-        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5], hspace=0.3)
+        gs = fig.add_gridspec(3, 1, height_ratios=[3, 1, 0.5], hspace=0.5)
         ax1 = fig.add_subplot(gs[0])
         ax3 = fig.add_subplot(gs[1])
     else:
-        gs = fig.add_gridspec(2, 1, height_ratios=[4, 0.5], hspace=0.2)
+        gs = fig.add_gridspec(2, 1, height_ratios=[4, 0.5], hspace=0.4)
         ax1 = fig.add_subplot(gs[0])
 
     # Main sentiment plot with clean line chart
@@ -69,7 +69,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
 
     # Format x-axis
     if timeframe_days <= 1:
-        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+        ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
         ax1.xaxis.set_major_locator(mdates.HourLocator(interval=2))
     else:
         ax1.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
@@ -126,7 +126,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
         
         # Format x-axis for article count plot
         if timeframe_days <= 1:
-            ax3.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M'))
+            ax3.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
             ax3.xaxis.set_major_locator(mdates.HourLocator(interval=2))
         else:
             ax3.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
@@ -145,11 +145,11 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     
     # Adjust layout with manual spacing to avoid tight_layout warnings
     if show_breakdown:
-        # Three subplot layout
-        plt.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.12, hspace=0.4)
+        # Three subplot layout - more space for date/time labels
+        plt.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.15, hspace=0.6)
     else:
-        # Two subplot layout  
-        plt.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.12, hspace=0.3)
+        # Two subplot layout - more space for date/time labels
+        plt.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.15, hspace=0.5)
     
     if save_plot:
         # Save plot instead of showing it

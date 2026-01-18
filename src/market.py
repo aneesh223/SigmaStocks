@@ -1,19 +1,10 @@
 import pandas as pd
-import numpy as np
 import yfinance as yf
 from datetime import datetime, timedelta
+import pytz
 
 def get_stock_data(ticker, period="1y"):
-    """
-    Fetch stock data using yfinance
-    
-    Args:
-        ticker (str): Stock ticker symbol
-        period (str): Data period (1y, 6mo, 3mo, etc.)
-    
-    Returns:
-        pd.DataFrame: Stock price data with OHLCV
-    """
+    """Fetch stock data using yfinance"""
     try:
         stock = yf.Ticker(ticker)
         data = stock.history(period=period)
@@ -30,16 +21,7 @@ def get_stock_data(ticker, period="1y"):
         return pd.DataFrame()
 
 def calculate_z_score(prices, window=50):
-    """
-    Calculate Z-Score based on moving average and standard deviation
-    
-    Args:
-        prices (pd.Series): Price series
-        window (int): Rolling window for calculation
-    
-    Returns:
-        float: Current Z-Score
-    """
+    """Calculate Z-Score based on moving average and standard deviation"""
     if len(prices) < window:
         return 0.0
     
@@ -59,18 +41,7 @@ def calculate_z_score(prices, window=50):
     return z_score
 
 def calculate_macd(prices, fast=12, slow=26, signal=9):
-    """
-    Calculate MACD (Moving Average Convergence Divergence)
-    
-    Args:
-        prices (pd.Series): Price series
-        fast (int): Fast EMA period
-        slow (int): Slow EMA period  
-        signal (int): Signal line EMA period
-    
-    Returns:
-        tuple: (macd_line, signal_line, histogram, bullish_crossover)
-    """
+    """Calculate MACD (Moving Average Convergence Divergence)"""
     if len(prices) < slow + signal:
         return 0.0, 0.0, 0.0, False
     
@@ -101,16 +72,7 @@ def calculate_macd(prices, fast=12, slow=26, signal=9):
     return curr_macd, curr_signal, histogram.iloc[-1], bullish_crossover
 
 def calculate_rsi(prices, window=14):
-    """
-    Calculate RSI (Relative Strength Index)
-    
-    Args:
-        prices (pd.Series): Price series
-        window (int): RSI calculation window
-    
-    Returns:
-        float: Current RSI value
-    """
+    """Calculate RSI (Relative Strength Index)"""
     if len(prices) < window + 1:
         return 50.0  # Neutral RSI
     
@@ -132,15 +94,7 @@ def calculate_rsi(prices, window=14):
     return rsi.iloc[-1]
 
 def calculate_value_score(z_score):
-    """
-    Calculate VALUE strategy score based on Z-Score
-    
-    Args:
-        z_score (float): Current Z-Score
-    
-    Returns:
-        tuple: (technical_score, explanation)
-    """
+    """Calculate VALUE strategy score based on Z-Score"""
     # VALUE Strategy: Look for oversold conditions (Z < -2.0)
     if z_score <= -2.5:
         technical_score = 9.0
@@ -170,19 +124,7 @@ def calculate_value_score(z_score):
     return technical_score, explanation
 
 def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossover, rsi):
-    """
-    Calculate MOMENTUM strategy score based on MACD and RSI
-    
-    Args:
-        macd_line (float): Current MACD value
-        signal_line (float): Current Signal line value
-        histogram (float): MACD histogram value
-        bullish_crossover (bool): Whether bullish crossover occurred
-        rsi (float): Current RSI value
-    
-    Returns:
-        tuple: (technical_score, explanation)
-    """
+    """Calculate MOMENTUM strategy score based on MACD and RSI"""
     # Base score starts at 5 (neutral)
     technical_score = 5.0
     explanations = []
@@ -224,18 +166,8 @@ def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossove
     
     return technical_score, explanation
 
-def calculate_verdict(ticker, sentiment_df, strategy="value"):
-    """
-    Calculate trading verdict based on technical analysis and sentiment
-    
-    Args:
-        ticker (str): Stock ticker symbol
-        sentiment_df (pd.DataFrame): Sentiment data from analyzer
-        strategy (str): Trading strategy - 'value' or 'momentum'
-    
-    Returns:
-        dict: Trading verdict with scores and explanation
-    """
+def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, custom_date=None):
+    """Calculate trading verdict based on technical analysis and sentiment"""
     if sentiment_df.empty:
         return {
             'Sentiment_Health': 5.0,
@@ -244,8 +176,28 @@ def calculate_verdict(ticker, sentiment_df, strategy="value"):
             'Explanation': "No sentiment data available for analysis."
         }
     
-    # Get stock data
-    stock_data = get_stock_data(ticker, period="1y")
+    # Convert lookback_days to appropriate yfinance period
+    if lookback_days == 1:
+        period = "1d"
+    elif lookback_days <= 2:
+        period = "2d"
+    elif lookback_days <= 5:
+        period = "5d"
+    elif lookback_days <= 7:
+        period = "7d"
+    elif lookback_days <= 30:
+        period = "1mo"
+    elif lookback_days <= 90:
+        period = "3mo"
+    elif lookback_days <= 180:
+        period = "6mo"
+    else:
+        period = "1y"
+    
+    print(f"Fetching {period} of price data for technical analysis...")
+    
+    # Get stock data with appropriate period
+    stock_data = get_stock_data(ticker, period=period)
     if stock_data.empty:
         return {
             'Sentiment_Health': 5.0,
@@ -254,12 +206,62 @@ def calculate_verdict(ticker, sentiment_df, strategy="value"):
             'Explanation': "No stock price data available for technical analysis."
         }
     
+    # Filter stock data to match the exact lookback period
+    if lookback_days <= 1:
+        # For 1-day analysis, filter to only that specific day
+        if custom_date:
+            target_date = custom_date.date()
+        else:
+            target_date = datetime.now().date()
+        
+        # Filter stock data to only the target date
+        if not stock_data.empty:
+            if stock_data.index.tz is not None:
+                # Convert target date to timezone-aware datetime for comparison
+                target_start = datetime.combine(target_date, datetime.min.time())
+                target_end = datetime.combine(target_date, datetime.max.time())
+                target_start = pytz.utc.localize(target_start).astimezone(stock_data.index.tz)
+                target_end = pytz.utc.localize(target_end).astimezone(stock_data.index.tz)
+                stock_data_filtered = stock_data[(stock_data.index >= target_start) & (stock_data.index <= target_end)]
+            else:
+                # For non-timezone aware data, filter by date
+                stock_data_filtered = stock_data[stock_data.index.date == target_date]
+    else:
+        # For multi-day analysis, use normal cutoff logic
+        if custom_date:
+            cutoff_date = custom_date - timedelta(days=lookback_days)
+        else:
+            cutoff_date = datetime.now() - timedelta(days=lookback_days)
+        
+        # Handle timezone awareness - stock data is timezone-aware
+        if not stock_data.empty and stock_data.index.tz is not None:
+            # Make cutoff_date timezone-aware to match stock data
+            if cutoff_date.tzinfo is None:
+                # Convert to UTC first, then to stock data's timezone
+                cutoff_date = pytz.utc.localize(cutoff_date)
+                cutoff_date = cutoff_date.astimezone(stock_data.index.tz)
+            else:
+                # Convert to stock data's timezone
+                cutoff_date = cutoff_date.astimezone(stock_data.index.tz)
+        
+        stock_data_filtered = stock_data[stock_data.index >= cutoff_date]
+    
+    if stock_data_filtered.empty:
+        print(f"Warning: No price data found within {lookback_days} day timeframe, using available data")
+        stock_data_filtered = stock_data
+    
+    print(f"Using {len(stock_data_filtered)} days of price data (requested: {lookback_days} days)")
+    if not stock_data_filtered.empty:
+        start_date = stock_data_filtered.index.min()
+        end_date = stock_data_filtered.index.max()
+        print(f"Price data range: {start_date.strftime('%Y-%m-%d %H:%M')} to {end_date.strftime('%Y-%m-%d %H:%M')}")
+    
     # Calculate sentiment health (convert from -1 to 1 scale to 0 to 10 scale)
     avg_sentiment = sentiment_df['Compound_Score'].mean()
     sentiment_health = (avg_sentiment + 1) * 5  # Convert to 0-10 scale
     
-    # Get closing prices
-    prices = stock_data['Close']
+    # Get closing prices from filtered data
+    prices = stock_data_filtered['Close']
     
     # Calculate technical indicators based on strategy
     if strategy.lower() == "momentum":
@@ -316,23 +318,11 @@ def calculate_verdict(ticker, sentiment_df, strategy="value"):
 
 # Legacy function for backward compatibility
 def get_financials(ticker, sentiment_df, timeframe_days=30):
-    """
-    Legacy function - now just returns sentiment_df for compatibility
-    """
+    """Legacy function - now just returns sentiment_df for compatibility"""
     return sentiment_df
 
 def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
-    """
-    Get combined sentiment and price data for visualization
-    
-    Args:
-        ticker (str): Stock ticker symbol
-        sentiment_df (pd.DataFrame): Sentiment data from analyzer
-        timeframe_days (int): Number of days to look back
-    
-    Returns:
-        pd.DataFrame: Combined sentiment and price data for plotting
-    """
+    """Get combined sentiment and price data for visualization"""
     if sentiment_df.empty:
         return sentiment_df
     
@@ -377,11 +367,25 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
             return sentiment_df
         
         # Filter price data for intraday if needed
-        if timeframe_days <= 1 and period:
-            start_timestamp = pd.Timestamp(start_date).tz_localize('UTC')
-            if price_data.index.tz is not None:
-                start_timestamp = start_timestamp.tz_convert(price_data.index.tz)
-            price_data = price_data[price_data.index >= start_timestamp]
+        if timeframe_days <= 1:
+            # For 1-day analysis, filter to only the specific day from sentiment data
+            if period:
+                # Get the target date from sentiment data
+                target_date = start_date
+                if hasattr(target_date, 'date'):
+                    target_date = target_date.date()
+                
+                # Filter price data to only the target date
+                if price_data.index.tz is not None:
+                    # Convert target date to timezone-aware datetime for comparison
+                    target_start = datetime.combine(target_date, datetime.min.time())
+                    target_end = datetime.combine(target_date, datetime.max.time())
+                    target_start = pd.Timestamp(target_start).tz_localize('UTC').tz_convert(price_data.index.tz)
+                    target_end = pd.Timestamp(target_end).tz_localize('UTC').tz_convert(price_data.index.tz)
+                    price_data = price_data[(price_data.index >= target_start) & (price_data.index <= target_end)]
+                else:
+                    # For non-timezone aware data, filter by date
+                    price_data = price_data[price_data.index.date == target_date]
         
         # Resample price data to match sentiment frequency
         if timeframe_days <= 1 and interval == "1h":
@@ -390,9 +394,17 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
             price_resampled = price_data.resample('D').last()
             price_resampled.index = price_resampled.index.date
         
-        print(f"Original price data: {len(price_data)} records from {price_data.index.min()} to {price_data.index.max()}")
+        start_time = price_data.index.min()
+        end_time = price_data.index.max()
+        print(f"Original price data: {len(price_data)} records from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
         print(f"Resampled price data: {len(price_resampled)} records")
-        print(f"Sentiment data: {len(sentiment_df)} records from {sentiment_df.index.min()} to {sentiment_df.index.max()}")
+        
+        sentiment_start = sentiment_df.index.min()
+        sentiment_end = sentiment_df.index.max()
+        if hasattr(sentiment_start, 'strftime'):
+            print(f"Sentiment data: {len(sentiment_df)} records from {sentiment_start.strftime('%Y-%m-%d %H:%M')} to {sentiment_end.strftime('%Y-%m-%d %H:%M')}")
+        else:
+            print(f"Sentiment data: {len(sentiment_df)} records from {sentiment_start} to {sentiment_end}")
         
         # Merge sentiment and price data
         merged_df = sentiment_df.join(price_resampled[['Close', 'Volume']], how='left')
