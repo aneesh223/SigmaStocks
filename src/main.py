@@ -27,7 +27,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, cust
         print("Analyzing sentiment... (AI running)")
         
         sentiment_df = analyzer.get_sentiment(raw_data, ticker, lookback_days)
-        best_news, worst_news = analyzer.get_top_headlines(raw_data, ticker, lookback_days)
+        best_news, worst_news = analyzer.get_top_headlines_wrapper(raw_data, ticker, lookback_days)
         
         # Date handling with testing mode support
         if testing_mode and custom_date:

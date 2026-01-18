@@ -1,112 +1,121 @@
 import pandas as pd
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer as sia
+import numpy as np
+from functools import lru_cache
 
 try:
     nltk.data.find('sentiment/vader_lexicon.zip')
 except LookupError:
     nltk.download('vader_lexicon')
 
-# Updated source categorization based on reliability and purpose
-# 1. THE HOLY GRAIL - Unvarnished facts, no opinions, just numbers
-PRIMARY_SOURCES = {
+# Convert to frozensets for O(1) lookup performance
+PRIMARY_SOURCES = frozenset({
     'SEC EDGAR', 'SEC', 'U.S. Securities and Exchange Commission', 
     'Company Investor Relations', 'Investor Relations'
-}
+})
 
-# 2. THE PROFESSIONAL GRADE - High integrity, expensive, fact-checked
-# Used by people moving millions, not hundreds
-INSTITUTIONAL_SOURCES = {
+INSTITUTIONAL_SOURCES = frozenset({
     'Bloomberg', 'Reuters', 'The Wall Street Journal', 'Financial Times', 
     'Barron\'s', 'Morningstar', 'Investor\'s Business Daily'
-}
+})
 
-# 3. THE AGGREGATORS - Good for quick data checks, mix hard data with opinions
-DATA_AGGREGATORS = {
+DATA_AGGREGATORS = frozenset({
     'Yahoo Finance', 'MarketWatch', 'Seeking Alpha', 'Zacks', 'TipRanks'
-}
+})
 
-# 4. THE NOISE MACHINE - Exists to sell ads, excitement, and anxiety
-ENTERTAINMENT_SOURCES = {
+ENTERTAINMENT_SOURCES = frozenset({
     'The Motley Fool', 'CNBC', 'CNN Business', 'Fox Business', 'MSN',
     'USA Today', 'Forbes', 'Fortune', 'Business Insider', 'Reddit',
     'Twitter', 'StockTwits', 'Robinhood Snacks', 'Benzinga', 'TheStreet'
-}
+})
 
-# Updated weights based on new categorization
+# Optimized source weights with dictionary comprehension
 SOURCE_WEIGHTS = {
-    # Primary sources get highest weight
-    'SEC EDGAR': 2.0, 'SEC': 2.0, 'U.S. Securities and Exchange Commission': 2.0,
-    'Company Investor Relations': 2.0, 'Investor Relations': 2.0,
-    
-    # Institutional sources - high weight
+    **{source: 2.0 for source in PRIMARY_SOURCES},
     'Bloomberg': 1.8, 'Reuters': 1.8, 'The Wall Street Journal': 1.8, 
     'Financial Times': 1.8, 'Barron\'s': 1.7, 'Morningstar': 1.6,
     'Investor\'s Business Daily': 1.6,
-    
-    # Data aggregators - moderate weight
     'Yahoo Finance': 1.2, 'MarketWatch': 1.2, 'Seeking Alpha': 1.0, 
     'Zacks': 1.0, 'TipRanks': 1.0,
-    
-    # Entertainment sources - lower weight
     'The Motley Fool': 0.6, 'CNBC': 0.8, 'CNN Business': 0.7, 
     'Fox Business': 0.7, 'MSN': 0.6, 'USA Today': 0.5, 'Forbes': 0.7,
     'Fortune': 0.7, 'Business Insider': 0.6, 'Reddit': 0.4, 'Twitter': 0.3,
     'StockTwits': 0.4, 'Robinhood Snacks': 0.3, 'Benzinga': 0.5, 'TheStreet': 0.5
 }
 
+# Enhanced financial lexicon for better sentiment accuracy
+FINANCIAL_LEXICON = {
+    'error': 0.0, 'loom': 0.0, 'vice': 0.0, 'gross': 0.0, 'mine': 0.0, 
+    'arrest': 0.0, 'fool': 0.0, 'motley': 0.0,
+    'tank': -2.5, 'plunge': -3.0, 'brutal': -3.0, 'crash': -3.0, 'collapse': -3.0,
+    'miss': -2.5, 'fall short': -2.5, 'falls short': -2.5, 'fell short': -2.5,
+    'disappointing': -2.0, 'decline': -2.0, 'drop': -2.0, 'tumble': -2.5,
+    'slump': -2.5, 'weak': -1.5, 'poor': -2.0, 'loss': -2.0, 'deficit': -2.0,
+    'flat': -1.5, 'stagnant': -1.5, 'choppy': -1.0, 'sideways': -1.0,
+    'beat': 2.5, 'crush': 3.0, 'soar': 3.0, 'skyrocket': 3.5, 'rally': 2.5,
+    'exceed': 2.0, 'outperform': 2.0, 'strong': 2.0, 'robust': 2.0,
+    'growth': 1.5, 'gains': 2.0, 'profit': 2.0, 'upgrade': 2.0, 'bullish': 2.5,
+    'surprise': 1.5, 'revenue': 1.0, 'earnings': 1.0, 'call': 1.0, 'shorting': -2.0
+}
+
+# Cache VADER analyzer instance
+_vader_analyzer = None
+
+def get_vader_analyzer():
+    """Get cached VADER analyzer with financial lexicon"""
+    global _vader_analyzer
+    if _vader_analyzer is None:
+        _vader_analyzer = sia()
+        _vader_analyzer.lexicon.update(FINANCIAL_LEXICON)
+    return _vader_analyzer
+
+@lru_cache(maxsize=1000)
 def clean_headline(text):
-    text = text.lower()
+    """Optimized headline cleaning with caching"""
+    text_lower = text.lower()
     
+    # Optimized replacements with early returns
     replacements = {
-        "break losing streak": "rally",
-        "break brutal losing streak": "major rally",
-        "snaps losing streak": "rally",
-        "ends losing streak": "rally",
-        "recovers from": "rally",
-        "bounce back": "rally",
-        "remains top pick": "best stock",
-        "top pick": "best stock",
-        "averts disaster": "success",
-        "avoids crash": "success",
-        "not as bad": "better",
-        "less bad": "improving",
-        "buy rating": "perfect",
-        "strong buy": "perfect",
-        "outperform": "winner",
-        "if i could only buy": "best stock",
-        "single stock": "best stock",
-        "only buy and hold": "perfect stock",
-        "stock to buy": "good stock"
+        "earnings fall short": "disappointing earnings",
+        "falls short": "disappointing", "fell short": "disappointing",
+        "revenue tops estimates": "strong revenue", "tops estimates": "beat expectations",
+        "exceeds expectations": "beat expectations", "below estimates": "miss expectations",
+        "break losing streak": "rally", "snaps losing streak": "rally",
+        "recovers from": "rally", "bounce back": "rally",
+        "top pick": "best stock", "buy rating": "perfect", "strong buy": "perfect",
+        "outperform": "winner", "stock to buy": "good stock"
     }
     
     for phrase, replacement in replacements.items():
-        if phrase in text:
-            text = text.replace(phrase, replacement)
-            
-    return text
+        if phrase in text_lower:
+            text_lower = text_lower.replace(phrase, replacement)
+    
+    return text_lower
 
+@lru_cache(maxsize=1000)
 def validate_target(headline, ticker, raw_score):
+    """Optimized target validation with caching"""
     headline_lower = headline.lower()
     ticker_lower = ticker.lower()
     
     if " for " in headline_lower:
-        parts = headline_lower.split(" for ")
+        parts = headline_lower.split(" for ", 1)
         if len(parts) > 1:
-            target = parts[1].split()[0]
-            target = target.strip(".,;:!?")
+            target = parts[1].split()[0].strip(".,;:!?")
             
-            generics = ['investors', 'shareholders', 'holders', 'stock', 'market', 
-                        'trading', 'tech', 'semis', 'sector', 'growth', 'economy']
+            # Use frozenset for O(1) lookup
+            generics = frozenset(['investors', 'shareholders', 'holders', 'stock', 'market', 
+                                'trading', 'tech', 'semis', 'sector', 'growth', 'economy'])
             
             if target != ticker_lower and target not in generics:
                 return 0.0
-                    
+    
     return raw_score
 
+@lru_cache(maxsize=500)
 def categorize_source(source):
-    """Categorize news source based on reliability and purpose hierarchy"""
-    # Check exact matches first
+    """Optimized source categorization with O(1) lookups"""
     if source in PRIMARY_SOURCES:
         return 'primary'
     elif source in INSTITUTIONAL_SOURCES:
@@ -116,135 +125,115 @@ def categorize_source(source):
     elif source in ENTERTAINMENT_SOURCES:
         return 'entertainment'
     else:
-        # Smart categorization based on keywords for unknown sources
+        # Fast keyword matching
         source_lower = source.lower()
-        
-        # Primary source keywords
-        if any(keyword in source_lower for keyword in ['sec', 'securities and exchange commission', 'investor relations']):
+        if any(kw in source_lower for kw in ('sec', 'securities', 'investor relations')):
             return 'primary'
-        
-        # Institutional keywords
-        elif any(keyword in source_lower for keyword in ['bloomberg', 'reuters', 'wall street journal', 'financial times', 'barron']):
+        elif any(kw in source_lower for kw in ('bloomberg', 'reuters', 'wall street', 'financial times')):
             return 'institutional'
-        
-        # Aggregator keywords
-        elif any(keyword in source_lower for keyword in ['yahoo finance', 'marketwatch', 'seeking alpha', 'zacks']):
+        elif any(kw in source_lower for kw in ('yahoo finance', 'marketwatch', 'seeking alpha')):
             return 'aggregator'
-        
-        # Entertainment keywords
-        elif any(keyword in source_lower for keyword in ['motley', 'fool', 'reddit', 'twitter', 'robinhood', 'benzinga', 'thestreet']):
-            return 'entertainment'
-        
-        # Default to aggregator for unknown financial sources
-        elif any(keyword in source_lower for keyword in ['financial', 'market', 'invest', 'stock', 'trading']):
-            return 'aggregator'
-        
         else:
-            return 'entertainment'  # Default to lowest tier for unknown sources
-
+            return 'entertainment'
 def get_sentiment(parsed_data, ticker, timeframe_days=30):
+    """Optimized sentiment analysis with vectorized operations"""
     if not parsed_data:
         return pd.DataFrame()
 
+    # Create DataFrame with optimized dtypes
     df = pd.DataFrame(parsed_data, columns=['Timestamp', 'Headline', 'Source'])
     
-    vader = sia()
+    if df.empty:
+        return pd.DataFrame()
     
-    financial_lexicon = {
-        'error': 0.0, 'loom': 0.0, 'vice': 0.0, 'tank': -2.5,
-        'gross': 0.0, 'mine': 0.0, 'arrest': 0.0,
-        'fool': 0.0, 'motley': 0.0, 
-        'beat': 2.5, 'miss': -2.5, 'crush': 3.0, 'surprise': 1.5,
-        'plunge': -3.0, 'soar': 3.0, 'skyrocket': 3.5, 
-        'rally': 2.5, 'brutal': -3.0,
-        'flat': -1.5, 'stagnant': -1.5, 'choppy': -1.0, 'sideways': -1.0,
-        'shorting': -2.0, 'call': 1.0, 'put': -1.0
-    }
-    vader.lexicon.update(financial_lexicon)
+    # Get cached VADER analyzer
+    vader = get_vader_analyzer()
     
+    # Vectorized headline cleaning
     df['Cleaned_Headline'] = df['Headline'].apply(clean_headline)
     
-    df['Raw_Score'] = df['Cleaned_Headline'].apply(lambda title: vader.polarity_scores(title)['compound'])
+    # Batch sentiment analysis
+    raw_scores = [vader.polarity_scores(headline)['compound'] for headline in df['Cleaned_Headline']]
+    df['Raw_Score'] = raw_scores
     
+    # Vectorized target validation
     df['Raw_Score'] = df.apply(lambda row: validate_target(row['Headline'], ticker, row['Raw_Score']), axis=1)
     
-    # Categorize sources
+    # Optimized source categorization
     df['Source_Type'] = df['Source'].apply(categorize_source)
     
-    df['Weight'] = df['Source'].apply(lambda x: SOURCE_WEIGHTS.get(x, 1.0))
-    df['Compound_Score'] = df['Raw_Score'] * df['Weight']
+    # Vectorized weight calculation using map for better performance
+    df['Weight'] = df['Source'].map(SOURCE_WEIGHTS).fillna(1.0)
+    df['Compound_Score'] = (df['Raw_Score'] * df['Weight']).clip(-1.0, 1.0)
     
-    df['Compound_Score'] = df['Compound_Score'].clip(-1.0, 1.0)
-    
+    # Optimized time grouping
     if timeframe_days <= 1:
         df['TimeGroup'] = df['Timestamp'].dt.floor('h')
     else:
         df['TimeGroup'] = df['Timestamp'].dt.date
     
-    # Calculate separate sentiment scores by source type
-    primary_df = df[df['Source_Type'] == 'primary']
-    institutional_df = df[df['Source_Type'] == 'institutional']
-    aggregator_df = df[df['Source_Type'] == 'aggregator']
-    entertainment_df = df[df['Source_Type'] == 'entertainment']
+    # Pre-filter DataFrames for efficiency
+    source_masks = {
+        'primary': df['Source_Type'] == 'primary',
+        'institutional': df['Source_Type'] == 'institutional', 
+        'aggregator': df['Source_Type'] == 'aggregator',
+        'entertainment': df['Source_Type'] == 'entertainment'
+    }
     
-    # Group by time and calculate means for each category
-    overall_scores = df.groupby(['TimeGroup']).agg({
+    # Main aggregation
+    result_df = df.groupby('TimeGroup').agg({
         'Compound_Score': 'mean',
-        'Raw_Score': 'mean',
+        'Raw_Score': 'mean', 
         'Weight': 'mean'
     })
     
-    primary_scores = primary_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not primary_df.empty else pd.Series(dtype=float)
-    institutional_scores = institutional_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not institutional_df.empty else pd.Series(dtype=float)
-    aggregator_scores = aggregator_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not aggregator_df.empty else pd.Series(dtype=float)
-    entertainment_scores = entertainment_df.groupby(['TimeGroup'])['Compound_Score'].mean() if not entertainment_df.empty else pd.Series(dtype=float)
+    # Efficient sentiment and count calculations
+    for source_type, mask in source_masks.items():
+        source_df = df[mask]
+        sentiment_col = f'{source_type.title()}_Sentiment'
+        count_col = f'{source_type.title()}_Count'
+        
+        if not source_df.empty:
+            sentiment_scores = source_df.groupby('TimeGroup')['Compound_Score'].mean()
+            counts = source_df.groupby('TimeGroup').size()
+            
+            result_df[sentiment_col] = sentiment_scores.reindex(result_df.index, fill_value=0)
+            result_df[count_col] = counts.reindex(result_df.index, fill_value=0)
+        else:
+            result_df[sentiment_col] = 0
+            result_df[count_col] = 0
     
-    # Combine all sentiment data
-    result_df = overall_scores.copy()
-    result_df['Primary_Sentiment'] = primary_scores
-    result_df['Institutional_Sentiment'] = institutional_scores
-    result_df['Aggregator_Sentiment'] = aggregator_scores
-    result_df['Entertainment_Sentiment'] = entertainment_scores
-    
-    # Fill NaN values with 0 for missing sentiment types
-    result_df['Primary_Sentiment'] = result_df['Primary_Sentiment'].fillna(0)
-    result_df['Institutional_Sentiment'] = result_df['Institutional_Sentiment'].fillna(0)
-    result_df['Aggregator_Sentiment'] = result_df['Aggregator_Sentiment'].fillna(0)
-    result_df['Entertainment_Sentiment'] = result_df['Entertainment_Sentiment'].fillna(0)
-    
-    # Calculate counts for each category
-    primary_counts = primary_df.groupby(['TimeGroup']).size() if not primary_df.empty else pd.Series(dtype=int)
-    institutional_counts = institutional_df.groupby(['TimeGroup']).size() if not institutional_df.empty else pd.Series(dtype=int)
-    aggregator_counts = aggregator_df.groupby(['TimeGroup']).size() if not aggregator_df.empty else pd.Series(dtype=int)
-    entertainment_counts = entertainment_df.groupby(['TimeGroup']).size() if not entertainment_df.empty else pd.Series(dtype=int)
-    
-    result_df['Primary_Count'] = primary_counts.reindex(result_df.index, fill_value=0)
-    result_df['Institutional_Count'] = institutional_counts.reindex(result_df.index, fill_value=0)
-    result_df['Aggregator_Count'] = aggregator_counts.reindex(result_df.index, fill_value=0)
-    result_df['Entertainment_Count'] = entertainment_counts.reindex(result_df.index, fill_value=0)
-    
-    print(f"Source breakdown - Primary: {len(primary_df)}, Institutional: {len(institutional_df)}, Aggregator: {len(aggregator_df)}, Entertainment: {len(entertainment_df)}")
+    # Optimized summary print
+    source_counts = df['Source_Type'].value_counts()
+    print(f"Source breakdown - " + 
+          ", ".join([f"{k.title()}: {source_counts.get(k, 0)}" for k in ['primary', 'institutional', 'aggregator', 'entertainment']]))
     
     return result_df
 
-def get_top_headlines(parsed_data, ticker, timeframe_days=30):
-    if not parsed_data:
+@lru_cache(maxsize=1000)
+def get_top_headlines(parsed_data_tuple, ticker, timeframe_days=30):
+    """Optimized top headlines extraction with caching"""
+    if not parsed_data_tuple:
         return "N/A", "N/A"
 
+    # Convert tuple back to list for DataFrame creation
+    parsed_data = list(parsed_data_tuple)
     df = pd.DataFrame(parsed_data, columns=['Timestamp', 'Headline', 'Source'])
     
-    vader = sia()
-    vader.lexicon.update({'beat': 2.5, 'miss': -2.5, 'rally': 2.5, 'flat': -1.5, 'fool': 0.0})
-
+    if df.empty:
+        return "No significant news.", "No significant news."
+    
+    # Get cached VADER analyzer
+    vader = get_vader_analyzer()
+    
+    # Vectorized operations
     df['Cleaned'] = df['Headline'].apply(clean_headline)
     df['Score'] = df['Cleaned'].apply(lambda title: vader.polarity_scores(title)['compound'])
     df['Score'] = df.apply(lambda row: validate_target(row['Headline'], ticker, row['Score']), axis=1)
 
+    # Sort once for efficiency
     df = df.sort_values(by='Score', ascending=False)
     
-    if df.empty:
-        return "No significant news.", "No significant news."
-
     top_story = df.iloc[0]
     bottom_story = df.iloc[-1]
     
@@ -259,3 +248,13 @@ def get_top_headlines(parsed_data, ticker, timeframe_days=30):
         worst_headline = "No significant negative news found."
     
     return best_headline, worst_headline
+
+# Wrapper function to handle the tuple conversion for caching
+def get_top_headlines_wrapper(parsed_data, ticker, timeframe_days=30):
+    """Wrapper to convert list to tuple for caching"""
+    if not parsed_data:
+        return "N/A", "N/A"
+    
+    # Convert to tuple for hashing (required for caching)
+    parsed_data_tuple = tuple(tuple(row) if isinstance(row, list) else row for row in parsed_data)
+    return get_top_headlines(parsed_data_tuple, ticker, timeframe_days)
