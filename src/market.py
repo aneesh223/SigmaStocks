@@ -21,23 +21,29 @@ def get_stock_data(ticker, period="1y"):
         if cache_key in _stock_cache:
             cached_data, cache_time = _stock_cache[cache_key]
             if datetime.now() - cache_time < timedelta(hours=1):
-                # print(f"Using cached stock data for {ticker} ({len(cached_data)} days)")  # Hidden from user
                 return cached_data
     
     try:
         stock = yf.Ticker(ticker)
-        # Optimize data fetching with specific columns only
+        # Optimize data fetching with specific columns only and reduced precision
         data = stock.history(period=period, auto_adjust=True, prepost=False)
         
         if data.empty:
             print(f"No market data found for {ticker}")
             return pd.DataFrame()
         
+        # Optimize memory usage with float32 precision
+        for col in ['Open', 'High', 'Low', 'Close']:
+            if col in data.columns:
+                data[col] = data[col].astype('float32')
+        
+        if 'Volume' in data.columns:
+            data['Volume'] = data['Volume'].astype('int32')
+        
         # Thread-safe cache update
         with _cache_lock:
             _stock_cache[cache_key] = (data, datetime.now())
         
-        # print(f"Fetched {len(data)} days of stock data for {ticker}")  # Hidden from user
         return data
     
     except Exception as e:
@@ -72,6 +78,42 @@ def calculate_z_score(prices, window=50):
     
     z_score = (current_price - current_mean) / current_std
     return float(z_score)
+
+def calculate_golden_death_cross(prices, short_period=50, long_period=200):
+    """Calculate Golden Cross and Death Cross signals"""
+    if len(prices) < long_period + 1:
+        return 0.0, False, False, None, None
+    
+    # Calculate SMAs
+    sma_short = prices.rolling(window=short_period).mean()
+    sma_long = prices.rolling(window=long_period).mean()
+    
+    if len(sma_short) < 2 or len(sma_long) < 2:
+        return 0.0, False, False, sma_short, sma_long
+    
+    # Check for crossovers
+    prev_short = sma_short.iloc[-2]
+    prev_long = sma_long.iloc[-2]
+    curr_short = sma_short.iloc[-1]
+    curr_long = sma_long.iloc[-1]
+    
+    # Golden Cross: SMA(50) crosses above SMA(200)
+    golden_cross = (prev_short <= prev_long) and (curr_short > curr_long)
+    
+    # Death Cross: SMA(50) crosses below SMA(200)
+    death_cross = (prev_short >= prev_long) and (curr_short < curr_long)
+    
+    # Calculate position score based on current relationship
+    if curr_short > curr_long:
+        # Bullish position (short SMA above long SMA)
+        gap_ratio = (curr_short - curr_long) / curr_long
+        cross_score = min(3.0, gap_ratio * 100)  # Scale the gap
+    else:
+        # Bearish position (short SMA below long SMA)
+        gap_ratio = (curr_long - curr_short) / curr_long
+        cross_score = max(-3.0, -gap_ratio * 100)  # Negative score
+    
+    return cross_score, golden_cross, death_cross, sma_short, sma_long
 
 def calculate_macd(prices, fast=12, slow=26, signal=9):
     """Calculate MACD using vectorized pandas operations"""
@@ -163,30 +205,49 @@ def calculate_value_score(z_score):
     return technical_score, explanation
 
 @lru_cache(maxsize=200)
-def calculate_momentum_score_cached(macd_line, signal_line, histogram, bullish_crossover, rsi):
+def calculate_momentum_score_cached(macd_line, signal_line, histogram, bullish_crossover, rsi, cross_score=0.0, golden_cross=False, death_cross=False):
     """Calculate MOMENTUM strategy score with caching"""
-    return calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossover, rsi)
+    return calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossover, rsi, cross_score, golden_cross, death_cross)
 
-def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossover, rsi):
-    """Calculate MOMENTUM strategy score based on MACD and RSI"""
+def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossover, rsi, cross_score=0.0, golden_cross=False, death_cross=False):
+    """Calculate MOMENTUM strategy score based on MACD, RSI, and Golden/Death Cross"""
     # Base score starts at 5 (neutral)
     technical_score = 5.0
     explanations = []
     
+    # Golden Cross / Death Cross Analysis (Major signals)
+    if golden_cross:
+        technical_score += 2.5
+        explanations.append("GOLDEN CROSS detected - major bullish signal")
+    elif death_cross:
+        technical_score -= 2.5
+        explanations.append("DEATH CROSS detected - major bearish signal")
+    else:
+        # Add position score based on SMA relationship
+        technical_score += cross_score
+        if cross_score > 1.0:
+            explanations.append(f"SMA(50) well above SMA(200) - strong bullish trend")
+        elif cross_score > 0:
+            explanations.append(f"SMA(50) above SMA(200) - bullish trend")
+        elif cross_score < -1.0:
+            explanations.append(f"SMA(50) well below SMA(200) - strong bearish trend")
+        elif cross_score < 0:
+            explanations.append(f"SMA(50) below SMA(200) - bearish trend")
+    
     # MACD Analysis
     if bullish_crossover:
         if rsi < 70:  # Not overbought
-            technical_score += 3.0
+            technical_score += 2.0
             explanations.append("MACD bullish crossover detected")
         else:
-            technical_score += 1.0
+            technical_score += 0.5
             explanations.append("MACD bullish crossover but RSI overbought")
     elif macd_line > signal_line:
         if histogram > 0:
-            technical_score += 2.0
+            technical_score += 1.5
             explanations.append("MACD above signal with positive momentum")
         else:
-            technical_score += 1.0
+            technical_score += 0.5
             explanations.append("MACD above signal but weakening")
     else:
         if histogram < 0:
@@ -195,10 +256,10 @@ def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossove
     
     # RSI Analysis
     if rsi < 30:
-        technical_score += 1.0
+        technical_score += 0.5
         explanations.append(f"RSI oversold at {rsi:.0f}")
     elif rsi > 70:
-        technical_score -= 1.0
+        technical_score -= 0.5
         explanations.append(f"RSI overbought at {rsi:.0f}")
     else:
         explanations.append(f"RSI neutral at {rsi:.0f}")
@@ -294,11 +355,22 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
                 # Fallback: use all price data if comparison fails
                 price_data_up_to_t = prices
                 
-            if len(price_data_up_to_t) >= 26:  # Need enough data for MACD
+            if len(price_data_up_to_t) >= 200:  # Need enough data for Golden/Death Cross
+                # Calculate Golden/Death Cross
+                cross_score, golden_cross, death_cross, sma_short, sma_long = calculate_golden_death_cross(price_data_up_to_t)
+                
+                # Calculate MACD and RSI
+                macd_line, signal_line, histogram, bullish_crossover = calculate_macd(price_data_up_to_t)
+                rsi = calculate_rsi(price_data_up_to_t)
+                
+                technical_score_t, _ = calculate_momentum_score_cached(
+                    macd_line, signal_line, histogram, bullish_crossover, rsi, cross_score, golden_cross, death_cross
+                )
+            elif len(price_data_up_to_t) >= 26:  # Need enough data for MACD only
                 macd_line, signal_line, histogram, bullish_crossover = calculate_macd(price_data_up_to_t)
                 rsi = calculate_rsi(price_data_up_to_t)
                 technical_score_t, _ = calculate_momentum_score_cached(
-                    macd_line, signal_line, histogram, bullish_crossover, rsi
+                    macd_line, signal_line, histogram, bullish_crossover, rsi, 0.0, False, False
                 )
             else:
                 technical_score_t = 5.0  # Neutral if not enough data
@@ -424,7 +496,7 @@ def get_financials(ticker, sentiment_df, timeframe_days=30):
     return sentiment_df
 
 def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
-    """Get combined sentiment and price data for visualization"""
+    """Get combined sentiment and price data for visualization with buy/sell signals"""
     if sentiment_df.empty:
         return sentiment_df
     
@@ -486,6 +558,49 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
                 # For non-timezone aware data, filter by date
                 price_data = price_data[price_data.index.date == target_date]
         
+        # Calculate buy/sell signals based on strategy
+        buy_signals = []
+        sell_signals = []
+        
+        if len(price_data) >= 200:  # Enough data for Golden/Death Cross
+            # Calculate Golden/Death Cross for the entire period
+            cross_score, _, _, sma_short, sma_long = calculate_golden_death_cross(price_data['Close'])
+            
+            # Find crossover points
+            for i in range(1, len(sma_short)):
+                if pd.notna(sma_short.iloc[i]) and pd.notna(sma_long.iloc[i]) and pd.notna(sma_short.iloc[i-1]) and pd.notna(sma_long.iloc[i-1]):
+                    prev_short = sma_short.iloc[i-1]
+                    prev_long = sma_long.iloc[i-1]
+                    curr_short = sma_short.iloc[i]
+                    curr_long = sma_long.iloc[i]
+                    
+                    # Golden Cross
+                    if prev_short <= prev_long and curr_short > curr_long:
+                        buy_signals.append((sma_short.index[i], price_data['Close'].iloc[i]))
+                    
+                    # Death Cross
+                    elif prev_short >= prev_long and curr_short < curr_long:
+                        sell_signals.append((sma_short.index[i], price_data['Close'].iloc[i]))
+        
+        # Also check for high buy scores (>7) and low buy scores (<4) from sentiment analysis
+        for timestamp, row in sentiment_df.iterrows():
+            if 'Buy_Score' in row and pd.notna(row['Buy_Score']):
+                if row['Buy_Score'] > 7.0:
+                    # Find corresponding price
+                    try:
+                        if timestamp in price_data.index:
+                            price = price_data.loc[timestamp, 'Close']
+                            buy_signals.append((timestamp, price))
+                    except:
+                        pass
+                elif row['Buy_Score'] < 4.0:
+                    try:
+                        if timestamp in price_data.index:
+                            price = price_data.loc[timestamp, 'Close']
+                            sell_signals.append((timestamp, price))
+                    except:
+                        pass
+        
         # Resample price data to match sentiment frequency
         if timeframe_days <= 1 and interval == "1h":
             price_resampled = price_data.resample('h').last()
@@ -527,7 +642,9 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
             'sentiment_records': len(sentiment_df),
             'sentiment_start': sentiment_start.strftime('%Y-%m-%d %H:%M') if hasattr(sentiment_start, 'strftime') else str(sentiment_start),
             'sentiment_end': sentiment_end.strftime('%Y-%m-%d %H:%M') if hasattr(sentiment_end, 'strftime') else str(sentiment_end),
-            'merged_records': len(merged_df)
+            'merged_records': len(merged_df),
+            'buy_signals': buy_signals,
+            'sell_signals': sell_signals
         }
         
         # Store data info in the dataframe as metadata

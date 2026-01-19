@@ -6,10 +6,13 @@ import matplotlib.dates as mdates
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import gc  # For garbage collection
 
 # Pre-configure matplotlib for better performance
 plt.rcParams['figure.max_open_warning'] = 0  # Disable warning for multiple figures
 plt.rcParams['axes.formatter.useoffset'] = False  # Better date formatting
+plt.rcParams['figure.dpi'] = 100  # Optimize DPI for performance
+plt.rcParams['savefig.dpi'] = 100
 
 def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode="VALUE"):
     """Optimized plotting function with memory efficiency and better performance"""
@@ -58,6 +61,22 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
             ax1_twin.tick_params(axis='y', labelcolor='#800080', labelsize=10)
             ax1_twin.grid(False)
 
+        # Add buy/sell signals if available
+        if hasattr(merged_df, 'attrs') and 'data_info' in merged_df.attrs:
+            data_info = merged_df.attrs['data_info']
+            
+            # Plot buy signals (Golden Cross + High Buy Scores)
+            if 'buy_signals' in data_info and data_info['buy_signals']:
+                buy_dates, buy_prices = zip(*data_info['buy_signals'])
+                ax1_twin.scatter(buy_dates, buy_prices, color='#00FF00', marker='^', 
+                               s=100, alpha=0.8, zorder=15, label='BUY Signal', edgecolors='black')
+            
+            # Plot sell signals (Death Cross + Low Buy Scores)  
+            if 'sell_signals' in data_info and data_info['sell_signals']:
+                sell_dates, sell_prices = zip(*data_info['sell_signals'])
+                ax1_twin.scatter(sell_dates, sell_prices, color='#FF0000', marker='v', 
+                               s=100, alpha=0.8, zorder=15, label='SELL Signal', edgecolors='black')
+
     # Optimized legend handling
     lines1, labels1 = ax1.get_legend_handles_labels()
     if 'Close' in merged_df.columns and not merged_df['Close'].isna().all():
@@ -95,8 +114,16 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     
     plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, fontsize=10)
 
-    # Optimized title and info
-    ax1.set_title(f'{name} ({ticker}) - Sentiment Analysis & Article Volume', 
+    # Optimized title and info with signal count
+    signal_info = ""
+    if hasattr(merged_df, 'attrs') and 'data_info' in merged_df.attrs:
+        data_info = merged_df.attrs['data_info']
+        buy_count = len(data_info.get('buy_signals', []))
+        sell_count = len(data_info.get('sell_signals', []))
+        if buy_count > 0 or sell_count > 0:
+            signal_info = f" • Signals: {buy_count} BUY, {sell_count} SELL"
+    
+    ax1.set_title(f'{name} ({ticker}) - Sentiment Analysis & Trading Signals{signal_info}', 
                   fontsize=16, fontweight='bold', pad=20)
     
     # Company info with optimized text rendering
@@ -111,6 +138,9 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     # Non-blocking show with optimized rendering
     plt.show(block=False)
     plt.draw()  # Force immediate rendering
+    
+    # Clean up memory
+    gc.collect()
         
     # Display simplified data summary
     if hasattr(merged_df, 'attrs') and 'data_info' in merged_df.attrs:

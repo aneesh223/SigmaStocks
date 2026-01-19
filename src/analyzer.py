@@ -1,25 +1,50 @@
 # Memory-optimized imports - only import what we need
 import pandas as pd
 import numpy as np
-from nltk.sentiment.vader import SentimentIntensityAnalyzer as sia
 from functools import lru_cache
 import re
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Lazy NLTK loading
-def _ensure_nltk_data():
-    """Lazy load NLTK data only when needed"""
-    try:
-        import nltk
-        nltk.data.find('sentiment/vader_lexicon.zip')
-    except LookupError:
-        import nltk
-        nltk.download('vader_lexicon', quiet=True)
+# FinBERT imports - lazy loaded for better performance
+_finbert_model = None
+_finbert_tokenizer = None
+
+def _ensure_finbert_model():
+    """Lazy load FinBERT model and tokenizer only when needed"""
+    global _finbert_model, _finbert_tokenizer
+    if _finbert_model is None:
+        try:
+            from transformers import AutoTokenizer, AutoModelForSequenceClassification
+            import torch
+            
+            print("Loading FinBERT model (first time only)...")
+            model_name = "ProsusAI/finbert"
+            _finbert_tokenizer = AutoTokenizer.from_pretrained(model_name)
+            _finbert_model = AutoModelForSequenceClassification.from_pretrained(model_name)
+            
+            # Check for GPU availability and move model
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if device.type == "cuda":
+                _finbert_model = _finbert_model.to(device)
+                print(f"✅ FinBERT loaded on GPU: {torch.cuda.get_device_name(0)}")
+            else:
+                print("✅ FinBERT loaded on CPU")
+            
+            # Set to evaluation mode for inference
+            _finbert_model.eval()
+            
+        except Exception as e:
+            print(f"Error loading FinBERT: {e}")
+            print("Falling back to simple sentiment analysis...")
+            return False
+    return True
 
 # Pre-compiled regex patterns for better performance
 _SOURCE_TAG_PATTERNS = [
     re.compile(r'^\[.*?\]\s*'),      # Remove from start
     re.compile(r'\s*\[.*?\]$'),      # Remove from end  
-    re.compile(r'\s*\[.*?\]\s*')     # Remove from middle
+    re.compile(r'\s*\[.*?\]\s*')     # Remove from middle (with proper spacing)
 ]
 
 # Memory-efficient source categorization using numpy arrays
@@ -47,70 +72,158 @@ _SOURCE_WEIGHT_VALUES = np.array([2.0] * len(PRIMARY_SOURCES) +
 
 SOURCE_WEIGHTS = dict(zip(_SOURCE_WEIGHT_KEYS, _SOURCE_WEIGHT_VALUES))
 
-# Enhanced financial lexicon for better sentiment accuracy
-FINANCIAL_LEXICON = {
-    'error': 0.0, 'loom': 0.0, 'vice': 0.0, 'gross': 0.0, 'mine': 0.0, 
-    'arrest': 0.0, 'fool': 0.0, 'motley': 0.0,
-    'tank': -2.5, 'plunge': -3.0, 'brutal': -3.0, 'crash': -3.0, 'collapse': -3.0,
-    'miss': -2.5, 'fall short': -2.5, 'falls short': -2.5, 'fell short': -2.5,
-    'disappointing': -2.0, 'decline': -2.0, 'drop': -2.0, 'tumble': -2.5,
-    'slump': -2.5, 'weak': -1.5, 'poor': -2.0, 'loss': -2.0, 'deficit': -2.0,
-    'flat': -1.5, 'stagnant': -1.5, 'choppy': -1.0, 'sideways': -1.0,
-    'beat': 2.5, 'crush': 3.0, 'soar': 3.0, 'skyrocket': 3.5, 'rally': 2.5,
-    'exceed': 2.0, 'outperform': 2.0, 'strong': 2.0, 'robust': 2.0,
-    'growth': 1.5, 'gains': 2.0, 'profit': 2.0, 'upgrade': 2.0, 'bullish': 2.5,
-    'surprise': 1.5, 'revenue': 1.0, 'earnings': 1.0, 'call': 1.0, 'shorting': -2.0
+# Enhanced financial lexicon for preprocessing (still useful for text cleaning)
+FINANCIAL_LEXICON_REPLACEMENTS = {
+    'earnings fall short': 'disappointing earnings',
+    'falls short': 'disappointing', 'fell short': 'disappointing',
+    'revenue tops estimates': 'strong revenue', 'tops estimates': 'beat expectations',
+    'exceeds expectations': 'beat expectations', 'below estimates': 'miss expectations',
+    'break losing streak': 'rally', 'snaps losing streak': 'rally',
+    'recovers from': 'rally', 'bounce back': 'rally',
+    'top pick': 'best stock', 'buy rating': 'strong buy', 'strong buy': 'excellent',
+    'outperform': 'winner', 'stock to buy': 'good investment'
 }
 
-# Cache VADER analyzer instance
-_vader_analyzer = None
-
-def remove_source_tags(headline):
-    """Remove source tags like [benzinga], [reuters] from headlines"""
-    if not headline:
-        return headline
-    
-    # Remove patterns like [source] at the beginning or end of headlines
-    cleaned = re.sub(r'^\[.*?\]\s*', '', headline)  # Remove from start
+# Cache FinBERT analyzer instance with lazy initialization
 @lru_cache(maxsize=1)
+def get_finbert_analyzer():
+    """Get cached FinBERT analyzer with lazy initialization"""
+    if _ensure_finbert_model():
+        return _finbert_model, _finbert_tokenizer
+    return None, None
+
+@lru_cache(maxsize=1000)
 def remove_source_tags(headline):
     """Remove source tags like [benzinga], [reuters] from headlines - optimized with pre-compiled regex"""
     if not headline:
         return headline
     
     cleaned = headline
-    for pattern in _SOURCE_TAG_PATTERNS:
-        cleaned = pattern.sub('', cleaned)
+    # Apply patterns in order: start, end, then middle
+    cleaned = _SOURCE_TAG_PATTERNS[0].sub('', cleaned)  # Remove from start
+    cleaned = _SOURCE_TAG_PATTERNS[1].sub('', cleaned)  # Remove from end
+    cleaned = _SOURCE_TAG_PATTERNS[2].sub(' ', cleaned)  # Remove from middle, replace with space
+    
+    # Clean up multiple spaces
+    cleaned = re.sub(r'\s+', ' ', cleaned)
     
     return cleaned.strip()
 
-def get_vader_analyzer():
-    """Get cached VADER analyzer with financial lexicon - lazy initialization"""
-    global _vader_analyzer
-    if _vader_analyzer is None:
-        _ensure_nltk_data()  # Lazy load NLTK data
-        _vader_analyzer = sia()
-        _vader_analyzer.lexicon.update(FINANCIAL_LEXICON)
-    return _vader_analyzer
+@lru_cache(maxsize=1000)
+def get_finbert_sentiment(text):
+    """Get sentiment score using FinBERT model with caching"""
+    model, tokenizer = get_finbert_analyzer()
+    
+    if model is None or tokenizer is None:
+        # Fallback to simple rule-based sentiment if FinBERT fails
+        return get_simple_sentiment(text)
+    
+    try:
+        import torch
+        
+        # Tokenize and get model prediction
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, padding=True, max_length=512)
+        
+        # Move to GPU if available
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            outputs = model(**inputs)
+            predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
+        
+        # FinBERT outputs: [negative, neutral, positive]
+        negative_score = predictions[0][0].item()
+        neutral_score = predictions[0][1].item()
+        positive_score = predictions[0][2].item()
+        
+        # Convert to compound score similar to VADER (-1 to 1 range)
+        compound_score = positive_score - negative_score
+        
+        return compound_score
+        
+    except Exception as e:
+        print(f"FinBERT error: {e}")
+        return get_simple_sentiment(text)
+
+def get_finbert_sentiment_batch(texts, batch_size=16):
+    """Batch process multiple texts for much faster FinBERT inference"""
+    model, tokenizer = get_finbert_analyzer()
+    
+    if model is None or tokenizer is None:
+        # Fallback to simple rule-based sentiment if FinBERT fails
+        return [get_simple_sentiment(text) for text in texts]
+    
+    try:
+        import torch
+        
+        # Check for GPU and move model if available
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        if device.type == "cuda":
+            model = model.to(device)
+            print(f"🚀 Using GPU acceleration: {torch.cuda.get_device_name(0)}")
+        else:
+            print("💻 Using CPU processing")
+        
+        results = []
+        
+        # Process in batches for optimal GPU utilization
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            
+            # Tokenize batch
+            inputs = tokenizer(batch_texts, return_tensors="pt", truncation=True, 
+                             padding=True, max_length=512)
+            
+            # Move batch to GPU if available
+            inputs = {k: v.to(device) for k, v in inputs.items()}
+            
+            with torch.no_grad():
+                outputs = model(**inputs)
+                predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
+            
+            # Process batch results
+            for j in range(len(batch_texts)):
+                # FinBERT outputs: [negative, neutral, positive]
+                negative_score = predictions[j][0].item()
+                neutral_score = predictions[j][1].item()
+                positive_score = predictions[j][2].item()
+                
+                # Convert to compound score similar to VADER (-1 to 1 range)
+                compound_score = positive_score - negative_score
+                results.append(compound_score)
+        
+        return results
+        
+    except Exception as e:
+        print(f"FinBERT batch error: {e}")
+        return [get_simple_sentiment(text) for text in texts]
+
+@lru_cache(maxsize=1000)
+def get_simple_sentiment(text):
+    """Simple rule-based sentiment analysis as fallback"""
+    text_lower = text.lower()
+    
+    positive_words = ['good', 'great', 'excellent', 'strong', 'beat', 'exceed', 'rally', 'soar', 'gain', 'profit', 'bullish', 'upgrade']
+    negative_words = ['bad', 'poor', 'weak', 'miss', 'fall', 'drop', 'decline', 'loss', 'bearish', 'downgrade', 'crash', 'plunge']
+    
+    positive_count = sum(1 for word in positive_words if word in text_lower)
+    negative_count = sum(1 for word in negative_words if word in text_lower)
+    
+    if positive_count > negative_count:
+        return min(0.8, positive_count * 0.2)
+    elif negative_count > positive_count:
+        return max(-0.8, -negative_count * 0.2)
+    else:
+        return 0.0
 
 @lru_cache(maxsize=1000)
 def clean_headline(text):
-    """Optimized headline cleaning with caching"""
+    """Optimized headline cleaning with caching - now optimized for FinBERT"""
     text_lower = text.lower()
     
-    # Optimized replacements with early returns
-    replacements = {
-        "earnings fall short": "disappointing earnings",
-        "falls short": "disappointing", "fell short": "disappointing",
-        "revenue tops estimates": "strong revenue", "tops estimates": "beat expectations",
-        "exceeds expectations": "beat expectations", "below estimates": "miss expectations",
-        "break losing streak": "rally", "snaps losing streak": "rally",
-        "recovers from": "rally", "bounce back": "rally",
-        "top pick": "best stock", "buy rating": "perfect", "strong buy": "perfect",
-        "outperform": "winner", "stock to buy": "good stock"
-    }
-    
-    for phrase, replacement in replacements.items():
+    # Use the financial lexicon replacements
+    for phrase, replacement in FINANCIAL_LEXICON_REPLACEMENTS.items():
         if phrase in text_lower:
             text_lower = text_lower.replace(phrase, replacement)
     
@@ -161,6 +274,7 @@ def categorize_source(source):
             return 'aggregator'
         else:
             return 'entertainment'
+
 def get_sentiment(parsed_data, ticker, timeframe_days=30):
     """Optimized sentiment analysis with vectorized operations and memory efficiency"""
     if not parsed_data:
@@ -176,14 +290,47 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     if not pd.api.types.is_datetime64_any_dtype(df['Timestamp']):
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
     
-    # Get cached VADER analyzer
-    vader = get_vader_analyzer()
+    # Optimize memory usage by using categorical data types for repeated strings
+    df['Source'] = df['Source'].astype('category')
     
-    # Vectorized headline cleaning using numpy operations
+    # Get cached FinBERT analyzer
+    model, tokenizer = get_finbert_analyzer()
+    
+    # Vectorized headline cleaning
     df['Cleaned_Headline'] = df['Headline'].apply(clean_headline)
     
-    # Batch sentiment analysis with list comprehension (faster than apply)
-    raw_scores = np.array([vader.polarity_scores(headline)['compound'] for headline in df['Cleaned_Headline']])
+    # Print simple summary (no source breakdown)
+    print(f"Analyzing {len(df)} news articles...")
+    
+    # Add progress bar for sentiment analysis
+    try:
+        from tqdm import tqdm
+        use_progress_bar = True
+    except ImportError:
+        use_progress_bar = False
+    
+    # Batch sentiment analysis with FinBERT and progress bar
+    if model is not None and tokenizer is not None:
+        print("Using FinBERT for financial sentiment analysis...")
+        
+        # Use batch processing for much faster inference
+        headlines_list = df['Cleaned_Headline'].tolist()
+        
+        if use_progress_bar:
+            print("Processing headlines in optimized batches...")
+            raw_scores = get_finbert_sentiment_batch(headlines_list, batch_size=16)
+        else:
+            raw_scores = get_finbert_sentiment_batch(headlines_list, batch_size=16)
+            
+        raw_scores = np.array(raw_scores)
+    else:
+        print("Using fallback sentiment analysis...")
+        if use_progress_bar:
+            raw_scores = np.array([get_simple_sentiment(headline) 
+                                 for headline in tqdm(df['Cleaned_Headline'], desc="Processing headlines")])
+        else:
+            raw_scores = np.array([get_simple_sentiment(headline) for headline in df['Cleaned_Headline']])
+    
     df['Raw_Score'] = raw_scores
     
     # Vectorized target validation using numpy where for better performance
@@ -191,12 +338,12 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     df['Raw_Score'] = valid_mask
     
     # Optimized source categorization with vectorized operations
-    df['Source_Type'] = df['Source'].apply(categorize_source)
+    df['Source_Type'] = df['Source'].apply(categorize_source).astype('category')
     
     # Vectorized weight calculation using numpy for better performance
     source_weights = df['Source'].map(lambda s: SOURCE_WEIGHTS.get(s.title(), SOURCE_WEIGHTS.get(s, 1.0)))
-    df['Weight'] = source_weights
-    df['Compound_Score'] = np.clip(df['Raw_Score'] * df['Weight'], -1.0, 1.0)
+    df['Weight'] = source_weights.astype('float32')  # Use float32 for memory efficiency
+    df['Compound_Score'] = np.clip(df['Raw_Score'] * df['Weight'], -1.0, 1.0).astype('float32')
     
     # Optimized time grouping
     if timeframe_days <= 1:
@@ -254,8 +401,8 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
             result_df[f'{source_type.title()}_Sentiment'] = 0
             result_df[f'{source_type.title()}_Count'] = 0
     
-    # Print simple summary (no source breakdown)
-    print(f"Analyzing {len(df)} news articles...")
+    # Clean up intermediate DataFrame to free memory
+    del df
     
     return result_df
 
@@ -272,12 +419,20 @@ def get_top_headlines(parsed_data_tuple, ticker, timeframe_days=30):
     if df.empty:
         return "No significant news.", "No significant news."
     
-    # Get cached VADER analyzer
-    vader = get_vader_analyzer()
+    # Get cached FinBERT analyzer
+    model, tokenizer = get_finbert_analyzer()
     
-    # Vectorized operations
+    # Vectorized operations - use clean_headline function
     df['Cleaned'] = df['Headline'].apply(clean_headline)
-    df['Score'] = df['Cleaned'].apply(lambda title: vader.polarity_scores(title)['compound'])
+    
+    if model is not None and tokenizer is not None:
+        # Use batch processing for better performance
+        cleaned_headlines = df['Cleaned'].tolist()
+        scores = get_finbert_sentiment_batch(cleaned_headlines, batch_size=16)
+        df['Score'] = scores
+    else:
+        df['Score'] = df['Cleaned'].apply(get_simple_sentiment)
+        
     df['Score'] = df.apply(lambda row: validate_target(row['Headline'], ticker, row['Score']), axis=1)
 
     # Sort once for efficiency

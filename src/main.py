@@ -57,10 +57,10 @@ def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, cust
         print(f"Market Cap: {mkt_cap}")
         print("-" * 50)
         print(f"Strategy:           {verdict['Strategy']}")
-        print(f"Market Sentiment:   {verdict['Sentiment_Health']}/10")
-        print(f"Market Analysis:    {verdict['Technical_Score']}/10")
+        print(f"Market Sentiment:   {verdict['Sentiment_Health']:.1f}/10")
+        print(f"Market Analysis:    {verdict['Technical_Score']:.1f}/10")
         print("-" * 50)
-        print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']}/10")
+        print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']:.1f}/10")
         print(f"\nREASONING:\n{verdict['Explanation']}")
         print("-" * 50)
         print(f"TOP POSITIVE NEWS:\n>> {best_news}")
@@ -99,44 +99,10 @@ def main():
         if not ticker: 
             continue
 
-        # Keep current timeframe options (as requested)
-        print("\nSelect Timeframe:")
-        print("1. 1D  (1 Day)")
-        print("2. 5D  (5 Days)")
-        print("3. 1M  (1 Month)")
-        print("4. 6M  (6 Months)")
-        print("5. YTD (Year-To-Date)")
-        print("6. 1Y  (1 Year)")
-        
-        choice = input("Enter choice (e.g., 5D, 2): ").upper().strip()
-
-        # Use testing date if in testing mode, otherwise current date
-        if testing_mode and custom_date:
-            today = custom_date
-        else:
-            today = datetime.now()
-        
-        if choice in ['1', '1D']:
-            lookback_days = 1
-        elif choice in ['2', '5D']:
-            lookback_days = 5
-        elif choice in ['3', '1M']:
-            lookback_days = 30
-        elif choice in ['4', '6M']:
-            lookback_days = 180
-        elif choice in ['5', 'YTD']:
-            start_of_year = datetime(today.year, 1, 1)
-            delta = today - start_of_year
-            lookback_days = delta.days
-        elif choice in ['6', '1Y']:
-            lookback_days = 365 
-        else:
-            print("Invalid selection. Defaulting to 1 Month.")
-            lookback_days = 30
-
+        # Strategy selection first
         print("\nSelect Investment Strategy:")
-        print("1. VALUE    (Buy the Dip)")
-        print("2. MOMENTUM (Swing Trading)")
+        print("1. VALUE    (Buy the Dip - Long-term Analysis)")
+        print("2. MOMENTUM (Swing Trading - Short-term Signals)")
         
         strategy_choice = input("Enter strategy choice (1-2): ").strip()
         
@@ -147,6 +113,57 @@ def main():
         else:
             print("Invalid selection. Defaulting to VALUE.")
             strategy_mode = "VALUE"
+
+        # Show appropriate timeframes based on strategy
+        print(f"\nSelect Timeframe for {strategy_mode} Strategy:")
+        
+        if strategy_mode == "VALUE":
+            print("1. 1M  (1 Month)")
+            print("2. 6M  (6 Months) - Recommended")
+            print("3. YTD (Year-To-Date)")
+            print("4. 1Y  (1 Year) - Best for Statistical Analysis")
+            
+            choice = input("Enter choice (1-4): ").strip()
+            
+            # Use testing date if in testing mode, otherwise current date
+            if testing_mode and custom_date:
+                today = custom_date
+            else:
+                today = datetime.now()
+            
+            if choice == '1':
+                lookback_days = 30
+            elif choice == '2':
+                lookback_days = 180
+            elif choice == '3':
+                start_of_year = datetime(today.year, 1, 1)
+                delta = today - start_of_year
+                lookback_days = delta.days
+            elif choice == '4':
+                lookback_days = 365
+            else:
+                print("Invalid selection. Defaulting to 6 Months.")
+                lookback_days = 180
+                
+        else:  # MOMENTUM strategy
+            print("1. 1D  (1 Day) - Intraday Signals")
+            print("2. 5D  (5 Days) - Short-term Swings")
+            print("3. 1M  (1 Month) - Recommended")
+            print("4. 6M  (6 Months) - Longer Trends")
+            
+            choice = input("Enter choice (1-4): ").strip()
+            
+            if choice == '1':
+                lookback_days = 1
+            elif choice == '2':
+                lookback_days = 5
+            elif choice == '3':
+                lookback_days = 30
+            elif choice == '4':
+                lookback_days = 180
+            else:
+                print("Invalid selection. Defaulting to 1 Month.")
+                lookback_days = 30
 
         analyze_stock(ticker, lookback_days, strategy_mode, testing_mode, custom_date)
         
