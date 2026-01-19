@@ -1,3 +1,4 @@
+# Memory-optimized imports
 from datetime import datetime, timedelta
 import pytz
 import scraper
@@ -6,123 +7,99 @@ import market
 import visualizer
 
 def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, custom_date=None):
+    """Optimized stock analysis with memory efficiency"""
     if testing_mode and custom_date:
-        print(f"\n🧪 DEBUG MODE ANALYSIS")
-        print(f"📅 Analysis Date: {custom_date.strftime('%B %d, %Y')}")
-        print(f"📊 Looking back {lookback_days} days from debug date")
-        print(f"🎯 Strategy: {strategy_mode}")
+        print(f"\n🧪 Testing mode: {custom_date.strftime('%B %d, %Y')}")
     
-    print(f"\nFetching data for {ticker} over last {lookback_days} days...")
-    print(f"Strategy: {strategy_mode}")
+    print(f"\nAnalyzing {ticker}...")
     
     try:
-        profile_data, raw_data = scraper.scrape_gnews(ticker, days=lookback_days)
+        # Memory-efficient data fetching
+        profile_data, raw_data = scraper.scrape_hybrid(ticker, days=lookback_days)
         company_name, industry, mkt_cap = profile_data
         
     except Exception as e:
-        print(f"Error scraping data: {e}")
+        print(f"Error: {e}")
         return
     
-    if raw_data:
-        print("Analyzing sentiment... (AI running)")
+    if not raw_data:
+        print("No data found. Check your connection.")
+        return
+    
+    # Optimized sentiment analysis
+    sentiment_df = analyzer.get_sentiment(raw_data, ticker, lookback_days)
+    best_news, worst_news = analyzer.get_top_headlines_wrapper(raw_data, ticker, lookback_days)
+    
+    # Optimized date filtering
+    today = custom_date if testing_mode and custom_date else datetime.now()
         
-        sentiment_df = analyzer.get_sentiment(raw_data, ticker, lookback_days)
-        best_news, worst_news = analyzer.get_top_headlines_wrapper(raw_data, ticker, lookback_days)
-        
-        # Date handling with testing mode support
-        if testing_mode and custom_date:
-            today = custom_date
-            print(f"🧪 TESTING MODE: Using {today.strftime('%B %d, %Y')} as analysis date")
-        else:
-            today = datetime.now()
-            
-        # For 1-day analysis, we want data only for that specific day
-        if lookback_days <= 1:
-            cutoff_date = today.date()
-            sentiment_df = sentiment_df[sentiment_df.index.date == cutoff_date]
-        else:
-            # For multi-day analysis, calculate normal cutoff
-            cutoff_date = (today - timedelta(days=lookback_days)).date()
-            if hasattr(sentiment_df.index[0], 'date'):
-                sentiment_df.index = sentiment_df.index.date
-            sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
-
-        if sentiment_df.empty:
-            print(f"No relevant news found for {ticker} in the last {lookback_days} days.")
-        else:
-            verdict = market.calculate_verdict(ticker, sentiment_df, strategy_mode.lower(), lookback_days, custom_date)
-            
-            if verdict:
-                print("\n" + "="*50)
-                print(f"   ANALYSIS FOR {company_name} ({ticker})")
-                print("="*50)
-                print(f"Industry:   {industry}")
-                print(f"Market Cap: {mkt_cap}")
-                print("-" * 50)
-                print(f"Strategy:           {verdict['Strategy']}")
-                print(f"Sentiment Health:   {verdict['Sentiment_Health']}/10")
-                print(f"Technical Score:    {verdict['Technical_Score']}/10")
-                print("-" * 50)
-                print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']}/10")
-                print(f"\nREASONING:\n{verdict['Explanation']}")
-                print("-" * 50)
-                print(f"TOP POSITIVE NEWS:\n>> {best_news}")
-                print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")
-                print("="*50 + "\n")
-            
-            # Get data for visualization
-            final_df = market.get_visualization_data(ticker, sentiment_df, lookback_days)
-            visualizer.plot_graph(ticker, final_df, profile_data, lookback_days, strategy_mode)
+    if lookback_days <= 1:
+        cutoff_date = today.date()
+        sentiment_df = sentiment_df[sentiment_df.index.date == cutoff_date]
     else:
-        print("Scraping failed or no data found.")
+        cutoff_date = (today - timedelta(days=lookback_days)).date()
+        if hasattr(sentiment_df.index[0], 'date'):
+            sentiment_df.index = sentiment_df.index.date
+        sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
+
+    if sentiment_df.empty:
+        print(f"No relevant news found for {ticker}.")
+        return
+    
+    # Calculate verdict and display results
+    verdict = market.calculate_verdict(ticker, sentiment_df, strategy_mode.lower(), lookback_days, custom_date)
+    
+    if verdict:
+        print("\n" + "="*50)
+        print(f"   ANALYSIS FOR {company_name} ({ticker})")
+        print("="*50)
+        print(f"Industry:   {industry}")
+        print(f"Market Cap: {mkt_cap}")
+        print("-" * 50)
+        print(f"Strategy:           {verdict['Strategy']}")
+        print(f"Sentiment Health:   {verdict['Sentiment_Health']}/10")
+        print(f"Technical Score:    {verdict['Technical_Score']}/10")
+        print("-" * 50)
+        print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']}/10")
+        print(f"\nREASONING:\n{verdict['Explanation']}")
+        print("-" * 50)
+        print(f"TOP POSITIVE NEWS:\n>> {best_news}")
+        print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")
+        print("="*50 + "\n")
+    
+    # Generate optimized visualization
+    final_df = market.get_visualization_data(ticker, sentiment_df, lookback_days)
+    visualizer.plot_graph(ticker, final_df, profile_data, lookback_days, strategy_mode)
 
 def main():
-    print("--------------------------------------------------")
-    print("   SIGMASTOCKS: AI SENTIMENT & VALUE ANALYZER")
-    print("--------------------------------------------------")
-    print("Enter 'EXIT' to stop the program")
-    print("Enter 'DEBUG' to activate testing mode")
-    print("--------------------------------------------------")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print("   📈 SIGMASTOCKS: AI SENTIMENT ANALYZER")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     testing_mode = False
     custom_date = None
     
     while True:
-        ticker = input("\nEnter ticker (e.g., TSLA): ").upper().strip()
+        ticker = input("\n🎯 Enter ticker (or 'exit'): ").upper().strip()
         
-        if ticker == 'EXIT':
-            print("Thank you for using SigmaStocks! Goodbye!")
+        if ticker in ['EXIT', 'QUIT', 'Q']: 
             break
         
         if ticker == 'DEBUG':
-            print("\n🧪 --- DEBUG MODE ACTIVATED ---")
-            print("Enter a custom date to simulate analysis from that point in time.")
-            print("Format: YYYY-MM-DD (e.g., 2026-01-15)")
-            
-            while True:
-                date_input = input("Enter test date: ").strip()
-                try:
-                    # Parse the date input
-                    year, month, day = map(int, date_input.split('-'))
-                    custom_date = datetime(year, month, day)
-                    print(f"✅ Debug mode set to: {custom_date.strftime('%B %d, %Y')}")
-                    testing_mode = True
-                    break
-                except (ValueError, TypeError):
-                    print("❌ Invalid date format. Please use YYYY-MM-DD (e.g., 2026-01-15)")
-                    continue
-            
-            # Now get the actual ticker
-            ticker = input("\nEnter ticker for debug analysis (e.g., TSLA): ").upper().strip()
-            
-            if not ticker or ticker in ['EXIT', 'DEBUG']:
-                print("Please enter a valid ticker symbol.")
-                continue
-
-        if not ticker:
-            print("Please enter a valid ticker symbol.")
+            print("\n🧪 Debug mode activated")
+            try:
+                date_input = input("Enter date (YYYY-MM-DD): ").strip()
+                custom_date = datetime.strptime(date_input, "%Y-%m-%d")
+                testing_mode = True
+                print(f"✅ Debug date set: {custom_date.strftime('%Y-%m-%d')}")
+            except ValueError:
+                print("❌ Invalid date format")
             continue
 
+        if not ticker: 
+            continue
+
+        # Keep current timeframe options (as requested)
         print("\nSelect Timeframe:")
         print("1. 1D  (1 Day)")
         print("2. 5D  (5 Days)")
@@ -173,9 +150,7 @@ def main():
 
         analyze_stock(ticker, lookback_days, strategy_mode, testing_mode, custom_date)
         
-        # Reset debug mode after each analysis
         if testing_mode:
-            print(f"\n🧪 Debug analysis complete. Returning to normal mode.")
             testing_mode = False
             custom_date = None
 

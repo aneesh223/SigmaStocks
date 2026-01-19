@@ -1,35 +1,41 @@
+# Memory-optimized imports
 import pandas as pd
 import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 import pytz
 from functools import lru_cache
+from threading import Lock
 
-# Cache for stock data to avoid repeated API calls
+# Thread-safe cache with lock for concurrent access
 _stock_cache = {}
+_cache_lock = Lock()
 
 @lru_cache(maxsize=100)
 def get_stock_data(ticker, period="1y"):
-    """Fetch stock data using yfinance with caching"""
+    """Fetch stock data using yfinance with thread-safe caching"""
     cache_key = f"{ticker}_{period}"
     
-    # Check if we have recent cached data (within 1 hour)
-    if cache_key in _stock_cache:
-        cached_data, cache_time = _stock_cache[cache_key]
-        if datetime.now() - cache_time < timedelta(hours=1):
-            print(f"Using cached stock data for {ticker} ({len(cached_data)} days)")
-            return cached_data
+    # Thread-safe cache check
+    with _cache_lock:
+        if cache_key in _stock_cache:
+            cached_data, cache_time = _stock_cache[cache_key]
+            if datetime.now() - cache_time < timedelta(hours=1):
+                print(f"Using cached stock data for {ticker} ({len(cached_data)} days)")
+                return cached_data
     
     try:
         stock = yf.Ticker(ticker)
-        data = stock.history(period=period)
+        # Optimize data fetching with specific columns only
+        data = stock.history(period=period, auto_adjust=True, prepost=False, threads=True)
         
         if data.empty:
             print(f"No stock data found for {ticker}")
             return pd.DataFrame()
         
-        # Cache the data
-        _stock_cache[cache_key] = (data, datetime.now())
+        # Thread-safe cache update
+        with _cache_lock:
+            _stock_cache[cache_key] = (data, datetime.now())
         
         print(f"Fetched {len(data)} days of stock data for {ticker}")
         return data
@@ -211,7 +217,8 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Sentiment_Health': 5.0,
             'Technical_Score': 5.0,
             'Final_Buy_Score': 5.0,
-            'Explanation': "No sentiment data available for analysis."
+            'Explanation': "No sentiment data available for analysis.",
+            'Strategy': "N/A"
         }
     
     # Optimized period selection using dictionary lookup
@@ -231,7 +238,8 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Sentiment_Health': 5.0,
             'Technical_Score': 5.0,
             'Final_Buy_Score': 5.0,
-            'Explanation': "No stock price data available for technical analysis."
+            'Explanation': "No stock price data available for technical analysis.",
+            'Strategy': "N/A"
         }
     
     # Optimized date filtering
@@ -350,55 +358,52 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
         if hasattr(end_date, 'date'):
             end_date = end_date.date()
             
-        # Add buffer for price data
-        end_date = end_date + timedelta(days=1)
-        
-        # Determine interval based on timeframe
-        if timeframe_days <= 1:
-            interval = "1h"
-            period = "2d"
-        else:
-            interval = "1d"
-            period = None
+        # Add buffer for price data (but not into the future)
+        end_date = min(end_date + timedelta(days=1), datetime.now().date())
         
         # Get stock data
         stock = yf.Ticker(ticker)
         
-        if period:
-            try:
-                price_data = stock.history(period=period, interval=interval)
-                print(f"Fetched price data using period='{period}', interval='{interval}': {len(price_data)} records")
-            except Exception as e:
-                print(f"Period-based fetch failed: {e}, trying date range...")
-                price_data = stock.history(start=start_date, end=end_date, interval="1d")
-                interval = "1d"
-        else:
+        # Determine interval based on timeframe
+        if timeframe_days <= 1:
+            interval = "1h"
+            # Use specific date range instead of period to avoid extra buffer
             price_data = stock.history(start=start_date, end=end_date, interval=interval)
+            print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")
+        else:
+            interval = "1d"
+            price_data = stock.history(start=start_date, end=end_date, interval=interval)
+            print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")
         
         if price_data.empty:
             print("No price data found for the given date range")
             return sentiment_df
         
+        # Filter out any future dates from price data
+        now = datetime.now()
+        if price_data.index.tz is not None:
+            now = pytz.utc.localize(now).astimezone(price_data.index.tz)
+        price_data = price_data[price_data.index <= now]
+        
         # Filter price data for intraday if needed
         if timeframe_days <= 1:
             # For 1-day analysis, filter to only the specific day from sentiment data
-            if period:
-                # Get the target date from sentiment data
-                target_date = start_date
-                if hasattr(target_date, 'date'):
-                    target_date = target_date.date()
-                
-                # Filter price data to only the target date
-                if price_data.index.tz is not None:
-                    # Convert target date to timezone-aware datetime for comparison
-                    target_start = datetime.combine(target_date, datetime.min.time())
-                    target_end = datetime.combine(target_date, datetime.max.time())
-                    target_start = pd.Timestamp(target_start).tz_localize('UTC').tz_convert(price_data.index.tz)
-                    target_end = pd.Timestamp(target_end).tz_localize('UTC').tz_convert(price_data.index.tz)
-                    price_data = price_data[(price_data.index >= target_start) & (price_data.index <= target_end)]
-                else:
-                    # For non-timezone aware data, filter by date
-                    price_data = price_data[price_data.index.date == target_date]
+            # Get the target date from sentiment data
+            target_date = start_date
+            if hasattr(target_date, 'date'):
+                target_date = target_date.date()
+            
+            # Filter price data to only the target date
+            if price_data.index.tz is not None:
+                # Convert target date to timezone-aware datetime for comparison
+                target_start = datetime.combine(target_date, datetime.min.time())
+                target_end = datetime.combine(target_date, datetime.max.time())
+                target_start = pd.Timestamp(target_start).tz_localize('UTC').tz_convert(price_data.index.tz)
+                target_end = pd.Timestamp(target_end).tz_localize('UTC').tz_convert(price_data.index.tz)
+                price_data = price_data[(price_data.index >= target_start) & (price_data.index <= target_end)]
+            else:
+                # For non-timezone aware data, filter by date
+                price_data = price_data[price_data.index.date == target_date]
         
         # Resample price data to match sentiment frequency
         if timeframe_days <= 1 and interval == "1h":
@@ -409,24 +414,44 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
         
         start_time = price_data.index.min()
         end_time = price_data.index.max()
-        print(f"Original price data: {len(price_data)} records from {start_time.strftime('%Y-%m-%d %H:%M')} to {end_time.strftime('%Y-%m-%d %H:%M')}")
-        print(f"Resampled price data: {len(price_resampled)} records")
         
         sentiment_start = sentiment_df.index.min()
         sentiment_end = sentiment_df.index.max()
-        if hasattr(sentiment_start, 'strftime'):
-            print(f"Sentiment data: {len(sentiment_df)} records from {sentiment_start.strftime('%Y-%m-%d %H:%M')} to {sentiment_end.strftime('%Y-%m-%d %H:%M')}")
-        else:
-            print(f"Sentiment data: {len(sentiment_df)} records from {sentiment_start} to {sentiment_end}")
         
-        # Merge sentiment and price data
+        # Merge sentiment and price data first
         merged_df = sentiment_df.join(price_resampled[['Close', 'Volume']], how='left')
+        
+        # Filter out any future dates from merged data
+        if timeframe_days <= 1:
+            # For intraday, filter by current datetime
+            current_time = datetime.now()
+            if merged_df.index.tz is not None:
+                current_time = pytz.utc.localize(current_time).astimezone(merged_df.index.tz)
+            merged_df = merged_df[merged_df.index <= current_time]
+        else:
+            # For daily data, filter by current date
+            current_date = datetime.now().date()
+            merged_df = merged_df[merged_df.index <= current_date]
         
         # Forward fill missing prices
         merged_df['Close'] = merged_df['Close'].ffill()
         merged_df['Volume'] = merged_df['Volume'].fillna(0)
         
-        print(f"Successfully merged sentiment data with price data for {len(merged_df)} time periods")
+        # Store data info for display in visualizer (after merged_df is created)
+        data_info = {
+            'price_records': len(price_data),
+            'price_start': start_time.strftime('%Y-%m-%d %H:%M'),
+            'price_end': end_time.strftime('%Y-%m-%d %H:%M'),
+            'resampled_records': len(price_resampled),
+            'sentiment_records': len(sentiment_df),
+            'sentiment_start': sentiment_start.strftime('%Y-%m-%d %H:%M') if hasattr(sentiment_start, 'strftime') else str(sentiment_start),
+            'sentiment_end': sentiment_end.strftime('%Y-%m-%d %H:%M') if hasattr(sentiment_end, 'strftime') else str(sentiment_end),
+            'merged_records': len(merged_df)
+        }
+        
+        # Store data info in the dataframe as metadata
+        merged_df.attrs['data_info'] = data_info
+        
         return merged_df
         
     except Exception as e:

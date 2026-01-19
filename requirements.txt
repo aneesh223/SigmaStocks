@@ -1,7 +1,20 @@
+# Core data processing
 pandas>=1.5.0
-yfinance>=0.2.0
-gnews>=0.3.0
-nltk>=3.8
-pytz>=2022.1
-matplotlib>=3.6.0
 numpy>=1.21.0
+
+# Financial data
+yfinance>=0.2.0
+
+# News scraping
+gnews>=0.3.0
+alpaca-py>=0.7.0
+
+# Sentiment analysis
+nltk>=3.8
+
+# Utilities
+pytz>=2022.1
+python-dotenv>=1.0.0
+
+# Visualization
+matplotlib>=3.6.0

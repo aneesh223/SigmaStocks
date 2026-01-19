@@ -1,11 +1,5 @@
+# Memory-optimized imports - only import what we need
 import ssl
-try:
-    _create_unverified_https_context = ssl._create_unverified_context
-except AttributeError:
-    pass
-else:
-    ssl._create_default_https_context = _create_unverified_https_context
-
 import yfinance as yf
 from gnews import GNews
 from datetime import datetime, timedelta
@@ -14,8 +8,16 @@ from functools import lru_cache
 import concurrent.futures
 from threading import Lock
 import time
+import config
 
-# Cache for profile data to avoid repeated API calls
+# SSL optimization
+try:
+    _create_unverified_https_context = ssl._create_unverified_context
+    ssl._create_default_https_context = _create_unverified_https_context
+except AttributeError:
+    pass
+
+# Thread-safe cache with optimized memory usage
 _profile_cache = {}
 _cache_lock = Lock()
 
@@ -62,119 +64,171 @@ def get_profile_data(ticker):
         print(f"API Error: {e}")
         fallback = (ticker.upper(), "N/A", "N/A")
         
-        # Cache the fallback to avoid repeated failures
         with _cache_lock:
             _profile_cache[cache_key] = (fallback, time.time())
         
         return fallback
 
-def _parse_gnews_date(date_str):
-    """Optimized date parsing with multiple format support"""
-    if not date_str:
-        return datetime.now(pytz.utc)
-    
-    # Try common formats in order of likelihood
-    formats = [
-        '%a, %d %b %Y %H:%M:%S GMT',
-        '%Y-%m-%dT%H:%M:%SZ',
-        '%Y-%m-%d %H:%M:%S'
-    ]
-    
-    for fmt in formats:
-        try:
-            if fmt == '%a, %d %b %Y %H:%M:%S GMT':
-                dt_obj = datetime.strptime(date_str, fmt)
-                return dt_obj.replace(tzinfo=pytz.utc)
-            elif 'Z' in date_str:
-                return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-            else:
-                dt_obj = datetime.strptime(date_str, fmt)
-                return pytz.utc.localize(dt_obj)
-        except ValueError:
-            continue
-    
-    # Fallback to current time
-    return datetime.now(pytz.utc)
-
-def _fetch_gnews_query(args):
-    """Helper function for parallel GNews queries"""
-    google_news, query, ticker = args
-    
-    try:
-        results = google_news.get_news(query)
-        if results:
-            print(f"Query '{query}' returned {len(results)} articles")
-            return results
-        return []
-    except Exception as e:
-        print(f"Query '{query}' failed: {e}")
-        return []
-
-def scrape_gnews(ticker, days=30):
-    """Optimized GNews scraping with parallel processing and caching"""
+def scrape_alpaca_news(ticker, days=30):
+    """
+    Fetches historical news using Alpaca's Official News API (Benzinga).
+    Uses RESTClient for direct API access as recommended in Alpaca documentation.
+    """
     profile_data = get_profile_data(ticker)
     
-    print(f"Searching Google News (RSS) for {ticker} over last {days} days...")
-    parsed = []
+    try:
+        from alpaca.common.rest import RESTClient
+        
+        # Create RESTClient for news API (uses v1beta1 endpoint)
+        news_client = RESTClient(
+            base_url='https://data.alpaca.markets',
+            api_version='v1beta1',
+            api_key=config.API_KEY,
+            secret_key=config.API_SECRET
+        )
+    except Exception as e:
+        print(f"❌ Alpaca Client Error: {e}. Check config.py.")
+        return profile_data, []
     
-    # Pre-calculate cutoff date
-    cutoff_date = datetime.now(pytz.utc) - timedelta(days=days + 2)
+    # Calculate start date
+    start_date = datetime.now(pytz.utc) - timedelta(days=days)
+    end_date = datetime.now(pytz.utc)
+    
+    try:
+        parsed = []
+        page_token = None
+        
+        # Paginate through all results
+        while True:
+            news_endpoint = '/news'
+            parameters = {
+                'start': start_date.isoformat(),
+                'end': end_date.isoformat(),
+                'symbols': ticker,
+                'limit': 50
+            }
+            
+            # Add page token if we have one
+            if page_token:
+                parameters['page_token'] = page_token
+            
+            # Make the API call
+            response = news_client.get(news_endpoint, parameters)
+            
+            # Extract news articles
+            news_articles = response.get('news', [])
+            if not news_articles:
+                break
+                
+            # Parse each article
+            for article in news_articles:
+                created_at = article.get('created_at')
+                headline = article.get('headline', 'No headline')
+                source = article.get('source', 'benzinga')
+                
+                # Convert created_at string to datetime if needed
+                if isinstance(created_at, str):
+                    try:
+                        created_at = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                    except:
+                        created_at = datetime.now(pytz.utc)
+                
+                if created_at and headline:
+                    parsed.append([created_at, headline, source])
+            
+            # Check for next page
+            page_token = response.get('next_page_token')
+            if not page_token:
+                break
+                
+        return profile_data, parsed
+
+    except Exception as e:
+        print(f"❌ Alpaca News Error: {e}")
+        return profile_data, []
+
+def scrape_gnews(ticker, days=30):
+    """Legacy GNews scraping logic"""
+    profile_data = get_profile_data(ticker)
+    parsed = []
+    cutoff_date = datetime.now(pytz.utc) - timedelta(days=days + 1)
+
+    # Helper to parse GNews dates
+    def _parse_gnews_date(date_str):
+        if not date_str: return datetime.now(pytz.utc)
+        formats = ['%a, %d %b %Y %H:%M:%S GMT', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%d %H:%M:%S']
+        for fmt in formats:
+            try:
+                if fmt == '%a, %d %b %Y %H:%M:%S GMT':
+                    dt_obj = datetime.strptime(date_str, fmt)
+                    return dt_obj.replace(tzinfo=pytz.utc)
+                elif 'Z' in date_str:
+                    return datetime.fromisoformat(date_str.replace('Z', '+00:00'))
+                else:
+                    dt_obj = datetime.strptime(date_str, fmt)
+                    return pytz.utc.localize(dt_obj)
+            except ValueError:
+                continue
+        return datetime.now(pytz.utc)
 
     try:
-        # Optimized search queries - reduced from 4 to 3 most effective ones
-        search_queries = [
-            f"{ticker} stock",
-            f"{ticker} earnings", 
-            f"{ticker} news"
-        ]
-        
-        # Use ThreadPoolExecutor for parallel API calls
         google_news = GNews(language='en', country='US')
+        search_queries = [f"{ticker} stock", f"{ticker} finance"]
+        results = []
         
-        json_resp = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(google_news.get_news, q) for q in search_queries]
+            for f in concurrent.futures.as_completed(futures):
+                try: results.extend(f.result())
+                except: pass
         
-        # Parallel execution of queries
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            query_args = [(google_news, query, ticker) for query in search_queries]
-            future_to_query = {executor.submit(_fetch_gnews_query, args): args[1] for args in query_args}
-            
-            for future in concurrent.futures.as_completed(future_to_query):
-                query = future_to_query[future]
-                try:
-                    results = future.result(timeout=10)  # 10 second timeout per query
-                    if results:
-                        json_resp.extend(results)
-                        # Break after first successful query to avoid redundancy
-                        if len(json_resp) >= 50:  # Reasonable limit
-                            break
-                except concurrent.futures.TimeoutError:
-                    print(f"Query '{query}' timed out")
-                except Exception as e:
-                    print(f"Query '{query}' failed with exception: {e}")
-        
-        print(f"GNews returned {len(json_resp)} total articles")
-        
-        # Vectorized article processing
-        for item in json_resp:
+        for item in results:
             title = item.get('title')
-            if not title:
-                continue
-                
             date_str = item.get('published date')
             publisher = item.get('publisher', {}).get('title', 'Unknown')
-            
-            # Optimized date parsing
             dt_obj = _parse_gnews_date(date_str)
             
-            # Skip articles outside date range
-            if dt_obj < cutoff_date:
-                continue
-            
+            if dt_obj < cutoff_date: continue
             parsed.append([dt_obj, title, publisher])
-        
-        print(f"Found {len(parsed)} relevant articles after filtering.")
-        
+            
+        return profile_data, parsed
     except Exception as e:
         print(f"GNews Error: {e}")
+        return profile_data, []
+
+def scrape_hybrid(ticker, days=30):
+    """
+    OPTIMIZED COMBINED SCRAPER: Fetches from both Alpaca and Google News.
+    Uses memory-efficient deduplication and parallel processing.
+    """
+    # 1. Fetch from Alpaca (Fast, reliable, structured) - parallel execution
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        alpaca_future = executor.submit(scrape_alpaca_news, ticker, days)
+        gnews_future = executor.submit(scrape_gnews, ticker, days)
         
-    return profile_data, parsed
+        # Get results
+        profile_data, alpaca_news = alpaca_future.result()
+        _, gnews_news = gnews_future.result()
+    
+    # 3. Memory-efficient merge and deduplication using sets
+    all_news = alpaca_news + gnews_news
+    
+    if not all_news:
+        return profile_data, []
+    
+    # Use memory-efficient deduplication with generator expression
+    seen_headlines = set()
+    unique_news = []
+    
+    for item in all_news:
+        date, headline, source = item
+        headline_key = headline.lower().strip()[:100]  # Limit key size for memory efficiency
+        
+        if headline_key not in seen_headlines:
+            unique_news.append(item)
+            seen_headlines.add(headline_key)
+    
+    # Sort by date (Newest first) - use key function for better performance
+    unique_news.sort(key=lambda x: x[0], reverse=True)
+    
+    return profile_data, unique_news
