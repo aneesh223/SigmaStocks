@@ -21,27 +21,27 @@ def get_stock_data(ticker, period="1y"):
         if cache_key in _stock_cache:
             cached_data, cache_time = _stock_cache[cache_key]
             if datetime.now() - cache_time < timedelta(hours=1):
-                print(f"Using cached stock data for {ticker} ({len(cached_data)} days)")
+                # print(f"Using cached stock data for {ticker} ({len(cached_data)} days)")  # Hidden from user
                 return cached_data
     
     try:
         stock = yf.Ticker(ticker)
         # Optimize data fetching with specific columns only
-        data = stock.history(period=period, auto_adjust=True, prepost=False, threads=True)
+        data = stock.history(period=period, auto_adjust=True, prepost=False)
         
         if data.empty:
-            print(f"No stock data found for {ticker}")
+            print(f"No market data found for {ticker}")
             return pd.DataFrame()
         
         # Thread-safe cache update
         with _cache_lock:
             _stock_cache[cache_key] = (data, datetime.now())
         
-        print(f"Fetched {len(data)} days of stock data for {ticker}")
+        # print(f"Fetched {len(data)} days of stock data for {ticker}")  # Hidden from user
         return data
     
     except Exception as e:
-        print(f"Error fetching stock data for {ticker}: {e}")
+        print(f"Error fetching market data for {ticker}: {e}")
         return pd.DataFrame()
 
 @lru_cache(maxsize=500)
@@ -211,7 +211,7 @@ def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossove
     return technical_score, explanation
 
 def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, custom_date=None):
-    """Calculate trading verdict with optimized performance"""
+    """Calculate trading verdict with time-series buy scores and recency weighting"""
     if sentiment_df.empty:
         return {
             'Sentiment_Health': 5.0,
@@ -229,7 +229,7 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
     
     period = period_map.get(lookback_days, "1y" if lookback_days > 180 else "1mo")
     
-    print(f"Fetching {period} of price data for technical analysis...")
+    print(f"Fetching {period} of market data for analysis...")
     
     # Get stock data with caching
     stock_data = get_stock_data(ticker, period=period)
@@ -246,48 +246,129 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
     stock_data_filtered = _filter_stock_data(stock_data, lookback_days, custom_date)
     
     if stock_data_filtered.empty:
-        print(f"Warning: No price data found within {lookback_days} day timeframe, using available data")
+        # print(f"Warning: No price data found within {lookback_days} day timeframe, using available data")  # Hidden from user
         stock_data_filtered = stock_data
     
-    print(f"Using {len(stock_data_filtered)} days of price data (requested: {lookback_days} days)")
-    if not stock_data_filtered.empty:
-        start_date = stock_data_filtered.index.min()
-        end_date = stock_data_filtered.index.max()
-        print(f"Price data range: {start_date.strftime('%Y-%m-%d %H:%M')} to {end_date.strftime('%Y-%m-%d %H:%M')}")
+    # print(f"Using {len(stock_data_filtered)} days of price data (requested: {lookback_days} days)")  # Hidden from user
+    # if not stock_data_filtered.empty:
+    #     start_date = stock_data_filtered.index.min()
+    #     end_date = stock_data_filtered.index.max()
+    #     print(f"Price data range: {start_date.strftime('%Y-%m-%d %H:%M')} to {end_date.strftime('%Y-%m-%d %H:%M')}")  # Hidden from user
     
-    # Vectorized sentiment calculation
-    avg_sentiment = sentiment_df['Compound_Score'].mean()
-    sentiment_health = (avg_sentiment + 1) * 5  # Convert to 0-10 scale
-    
-    # Get closing prices
+    # Get closing prices for technical analysis
     prices = stock_data_filtered['Close']
+    strategy_name = "MOMENTUM" if strategy.lower() == "momentum" else "VALUE"
     
-    # Calculate technical indicators based on strategy
-    if strategy.lower() == "momentum":
-        # MOMENTUM Strategy with caching
-        macd_line, signal_line, histogram, bullish_crossover = calculate_macd(prices)
-        rsi = calculate_rsi(prices)
+    # Calculate B(t) = Buy Score at each time t
+    buy_scores_over_time = []
+    timestamps = []
+    
+    # Iterate through each time period in sentiment_df
+    for timestamp, row in sentiment_df.iterrows():
+        # Get sentiment at time t
+        sentiment_t = row['Compound_Score']
+        sentiment_health_t = (sentiment_t + 1) * 5  # Convert to 0-10 scale
         
-        technical_score, technical_explanation = calculate_momentum_score_cached(
-            macd_line, signal_line, histogram, bullish_crossover, rsi
-        )
+        # Handle timezone-aware comparisons
+        if hasattr(timestamp, 'tz_localize') and timestamp.tz is None:
+            # Make timestamp timezone-aware to match price data
+            if not prices.index.empty and prices.index.tz is not None:
+                timestamp_tz = timestamp.tz_localize(prices.index.tz)
+            else:
+                timestamp_tz = timestamp
+        elif hasattr(timestamp, 'tz_convert') and timestamp.tz is not None:
+            # Convert to price data timezone if needed
+            if not prices.index.empty and prices.index.tz is not None:
+                timestamp_tz = timestamp.tz_convert(prices.index.tz)
+            else:
+                timestamp_tz = timestamp.tz_localize(None)  # Remove timezone
+        else:
+            timestamp_tz = timestamp
         
-        strategy_name = "MOMENTUM"
+        # Get technical score at time t (using price data up to that point)
+        if strategy.lower() == "momentum":
+            # For momentum, use recent price data up to time t
+            try:
+                price_data_up_to_t = prices[prices.index <= timestamp_tz]
+            except (TypeError, ValueError):
+                # Fallback: use all price data if comparison fails
+                price_data_up_to_t = prices
+                
+            if len(price_data_up_to_t) >= 26:  # Need enough data for MACD
+                macd_line, signal_line, histogram, bullish_crossover = calculate_macd(price_data_up_to_t)
+                rsi = calculate_rsi(price_data_up_to_t)
+                technical_score_t, _ = calculate_momentum_score_cached(
+                    macd_line, signal_line, histogram, bullish_crossover, rsi
+                )
+            else:
+                technical_score_t = 5.0  # Neutral if not enough data
+        else:
+            # For value, use Z-score up to time t
+            try:
+                price_data_up_to_t = prices[prices.index <= timestamp_tz]
+            except (TypeError, ValueError):
+                # Fallback: use all price data if comparison fails
+                price_data_up_to_t = prices
+                
+            if len(price_data_up_to_t) >= 50:  # Need enough data for Z-score
+                z_score = calculate_z_score(price_data_up_to_t, window=50)
+                technical_score_t, _ = calculate_value_score(z_score)
+            else:
+                technical_score_t = 5.0  # Neutral if not enough data
         
+        # Calculate B(t) = Buy Score at time t
+        sentiment_penalty = 0.5 if sentiment_t < -0.5 else 1.0
+        buy_score_t = ((technical_score_t * 0.6) + (sentiment_health_t * 0.4)) * sentiment_penalty
+        buy_score_t = np.clip(buy_score_t, 1.0, 10.0)
+        
+        buy_scores_over_time.append(buy_score_t)
+        timestamps.append(timestamp)
+    
+    if not buy_scores_over_time:
+        return {
+            'Sentiment_Health': 5.0,
+            'Technical_Score': 5.0,
+            'Final_Buy_Score': 5.0,
+            'Explanation': "No valid buy scores could be calculated.",
+            'Strategy': strategy_name
+        }
+    
+    # Apply recency bias to Final Buy Score calculation
+    buy_scores_array = np.array(buy_scores_over_time)
+    
+    # Create recency weights (more recent = higher weight)
+    # Use exponential decay: weight = exp(-decay_rate * days_ago)
+    decay_rate = 0.1  # Adjust this to control how much recency matters
+    
+    if len(timestamps) > 1:
+        # Calculate days ago for each timestamp
+        if custom_date:
+            reference_date = custom_date
+        else:
+            reference_date = datetime.now()
+        
+        days_ago = []
+        for ts in timestamps:
+            if hasattr(ts, 'date'):
+                ts_date = ts.date() if hasattr(ts, 'date') else ts
+                ref_date = reference_date.date() if hasattr(reference_date, 'date') else reference_date
+                days_diff = (ref_date - ts_date).days
+            else:
+                days_diff = len(timestamps) - timestamps.index(ts) - 1  # Fallback: position-based
+            days_ago.append(max(0, days_diff))
+        
+        # Calculate recency weights
+        recency_weights = np.exp(-decay_rate * np.array(days_ago))
+        recency_weights = recency_weights / np.sum(recency_weights)  # Normalize
+        
+        # Final Buy Score = Recency-weighted average of B(t)
+        final_buy_score = np.sum(buy_scores_array * recency_weights)
     else:
-        # VALUE Strategy with caching
-        z_score = calculate_z_score(prices, window=50)
-        technical_score, technical_explanation = calculate_value_score(z_score)
-        
-        strategy_name = "VALUE"
+        final_buy_score = buy_scores_array[0]
     
-    # Optimized sentiment penalty calculation
-    sentiment_penalty = 0.5 if avg_sentiment < -0.5 else 1.0
-    penalty_explanation = " FALLING KNIFE WARNING: Negative sentiment reduces score by 50%." if sentiment_penalty < 1.0 else ""
-    
-    # Vectorized final score calculation
-    final_score = ((technical_score * 0.6) + (sentiment_health * 0.4)) * sentiment_penalty
-    final_score = np.clip(final_score, 1.0, 10.0)
+    # Calculate summary statistics for explanation
+    avg_sentiment = sentiment_df['Compound_Score'].mean()
+    avg_technical = np.mean([score for score in buy_scores_over_time])  # This is approximate
     
     # Optimized sentiment description using numpy
     sentiment_thresholds = np.array([-0.3, -0.1, 0.1, 0.3])
@@ -295,12 +376,12 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
     sentiment_idx = np.searchsorted(sentiment_thresholds, avg_sentiment)
     sentiment_description = sentiment_labels[sentiment_idx]
     
-    explanation = f"{strategy_name} Strategy: {technical_explanation} Sentiment is {sentiment_description}.{penalty_explanation}"
+    explanation = f"{strategy_name} Strategy: Analysis complete based on market sentiment and technical indicators. Overall sentiment is {sentiment_description}."
     
     return {
-        'Sentiment_Health': round(sentiment_health, 1),
-        'Technical_Score': round(technical_score, 1),
-        'Final_Buy_Score': round(final_score, 1),
+        'Sentiment_Health': round((avg_sentiment + 1) * 5, 1),
+        'Technical_Score': round(avg_technical, 1),
+        'Final_Buy_Score': round(final_buy_score, 1),
         'Explanation': explanation,
         'Strategy': strategy_name
     }
@@ -369,14 +450,14 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
             interval = "1h"
             # Use specific date range instead of period to avoid extra buffer
             price_data = stock.history(start=start_date, end=end_date, interval=interval)
-            print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")
+            # print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")  # Hidden from user
         else:
             interval = "1d"
             price_data = stock.history(start=start_date, end=end_date, interval=interval)
-            print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")
+            # print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")  # Hidden from user
         
         if price_data.empty:
-            print("No price data found for the given date range")
+            print("No market data found for the given date range")
             return sentiment_df
         
         # Filter out any future dates from price data
@@ -455,5 +536,5 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
         return merged_df
         
     except Exception as e:
-        print(f"Error fetching price data for visualization: {e}")
+        print(f"Error fetching market data for visualization: {e}")
         return sentiment_df

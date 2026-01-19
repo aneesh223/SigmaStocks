@@ -57,8 +57,8 @@ def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, cust
         print(f"Market Cap: {mkt_cap}")
         print("-" * 50)
         print(f"Strategy:           {verdict['Strategy']}")
-        print(f"Sentiment Health:   {verdict['Sentiment_Health']}/10")
-        print(f"Technical Score:    {verdict['Technical_Score']}/10")
+        print(f"Market Sentiment:   {verdict['Sentiment_Health']}/10")
+        print(f"Market Analysis:    {verdict['Technical_Score']}/10")
         print("-" * 50)
         print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']}/10")
         print(f"\nREASONING:\n{verdict['Explanation']}")
@@ -106,7 +106,7 @@ def main():
         print("3. 1M  (1 Month)")
         print("4. 6M  (6 Months)")
         print("5. YTD (Year-To-Date)")
-        print("6. MAX (Max Available Data)")
+        print("6. 1Y  (1 Year)")
         
         choice = input("Enter choice (e.g., 5D, 2): ").upper().strip()
 
@@ -128,15 +128,15 @@ def main():
             start_of_year = datetime(today.year, 1, 1)
             delta = today - start_of_year
             lookback_days = delta.days
-        elif choice in ['6', 'MAX', '1Y']:
+        elif choice in ['6', '1Y']:
             lookback_days = 365 
         else:
             print("Invalid selection. Defaulting to 1 Month.")
             lookback_days = 30
 
         print("\nSelect Investment Strategy:")
-        print("1. VALUE    (Buy the Dip - Z-Score based)")
-        print("2. MOMENTUM (Swing Trading - MACD/RSI based)")
+        print("1. VALUE    (Buy the Dip)")
+        print("2. MOMENTUM (Swing Trading)")
         
         strategy_choice = input("Enter strategy choice (1-2): ").strip()
         

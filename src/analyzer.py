@@ -255,7 +255,7 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
             result_df[f'{source_type.title()}_Count'] = 0
     
     # Print simple summary (no source breakdown)
-    print(f"Analyzed {len(df)} news articles for sentiment")
+    print(f"Analyzing {len(df)} news articles...")
     
     return result_df
 
