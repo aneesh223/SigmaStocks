@@ -9,7 +9,8 @@ yfinance>=0.2.0
 gnews>=0.3.0
 alpaca-py>=0.7.0
 
-# Financial sentiment analysis with FinBERT
+# Hybrid sentiment analysis: VADER + DistilRoBERTa
+vaderSentiment>=3.3.2
 transformers>=4.30.0
 torch>=2.0.0
 tokenizers>=0.13.0
