@@ -411,40 +411,45 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Strategy': strategy_name
         }
     
-    # STEP 2: Calculate Final_Buy_Score at each time t using rolling window of B(t) values
+    # STEP 2: Calculate Final_Buy_Score at each time t using OPTIMIZED rolling window
     final_buy_scores_over_time = []
     timestamps = []
     
     # Define rolling window size (in days) - shorter window for more responsiveness
     rolling_window_days = min(lookback_days if lookback_days > 1 else 3, 5)  # Max 5 days, min 3 days
     
-    print(f"Calculating Final_Buy_Scores using {rolling_window_days}-day rolling window...")
+    print(f"Calculating Final_Buy_Scores using OPTIMIZED {rolling_window_days}-day rolling window...")
     
-    for i, (timestamp, _) in enumerate(buy_scores_at_t):
+    # OPTIMIZATION: Use sliding window with deque for O(N) complexity instead of O(N²)
+    from collections import deque
+    import time
+    
+    start_time = time.time()
+    
+    # Sliding window to store (timestamp, buy_score) tuples within the rolling window
+    window = deque()
+    
+    for i, (timestamp, buy_score_t) in enumerate(buy_scores_at_t):
         timestamps.append(timestamp)
         
         # Define the rolling window: from (t - rolling_window_days) to t
         window_start = timestamp - pd.Timedelta(days=rolling_window_days)
         
-        # Get B(t) values within the rolling window
-        window_buy_scores = []
-        window_timestamps = []
+        # OPTIMIZATION: Remove expired entries from LEFT side of deque - O(k) where k << N
+        while window and window[0][0] < window_start:
+            window.popleft()  # O(1) operation
         
-        for window_ts, window_buy_score in buy_scores_at_t:
-            if window_ts >= window_start and window_ts <= timestamp:
-                window_buy_scores.append(window_buy_score)
-                window_timestamps.append(window_ts)
+        # Add current score to RIGHT side - O(1)
+        window.append((timestamp, buy_score_t))
         
-        if not window_buy_scores:
-            # If no B(t) values in window, use neutral score
-            final_buy_scores_over_time.append(5.0)
-            continue
-        
-        # Apply recency weighting within the rolling window
-        window_buy_scores_array = np.array(window_buy_scores)
-        decay_rate = 0.5  # Much higher decay rate - recent data gets much more weight
-        
-        if len(window_timestamps) > 1:
+        # Calculate recency-weighted average of current window - O(k) where k = window size
+        if len(window) == 1:
+            final_buy_score_t = window[0][1]  # Single score
+        else:
+            # Extract scores and timestamps from current window
+            window_timestamps = [ts for ts, _ in window]
+            window_buy_scores = [score for _, score in window]
+            
             # Calculate days ago for each timestamp in the window (relative to current timestamp)
             days_ago = []
             for window_ts in window_timestamps:
@@ -455,15 +460,17 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
                 days_ago.append(max(0, days_diff))
             
             # Calculate recency weights (more recent = higher weight)
+            decay_rate = 0.5  # Much higher decay rate - recent data gets much more weight
             recency_weights = np.exp(-decay_rate * np.array(days_ago))
             recency_weights = recency_weights / np.sum(recency_weights)  # Normalize
             
             # Final Buy Score at time t = Recency-weighted average of window B(t) scores
-            final_buy_score_t = np.sum(window_buy_scores_array * recency_weights)
-        else:
-            final_buy_score_t = window_buy_scores_array[0]
+            final_buy_score_t = np.sum(np.array(window_buy_scores) * recency_weights)
         
         final_buy_scores_over_time.append(final_buy_score_t)
+    
+    optimization_time = time.time() - start_time
+    print(f"✅ Optimized calculation completed in {optimization_time:.3f} seconds (O(N) complexity)")
     
     # For the main program display, use the most recent Final_Buy_Score
     final_buy_score = final_buy_scores_over_time[-1]
