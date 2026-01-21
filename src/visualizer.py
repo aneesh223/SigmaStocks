@@ -104,9 +104,24 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     ax2.set_facecolor('#FAFAFA')
     ax2.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, fontsize=10)
 
-    # Optimized x-axis formatting
+    # Optimized x-axis formatting with user-friendly timezone display
     if timeframe_days <= 1:
-        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d %H:%M'))
+        # For intraday, show times in Eastern Time for better user experience
+        import pytz
+        et_tz = pytz.timezone('US/Eastern')
+        
+        # Create a custom formatter that converts UTC to ET for display
+        def format_time_et(x, pos):
+            try:
+                dt = mdates.num2date(x)
+                if dt.tzinfo is None:
+                    dt = pytz.utc.localize(dt)
+                dt_et = dt.astimezone(et_tz)
+                return dt_et.strftime('%m/%d %H:%M ET')
+            except:
+                return mdates.DateFormatter('%m/%d %H:%M')(x, pos)
+        
+        ax2.xaxis.set_major_formatter(plt.FuncFormatter(format_time_et))
         ax2.xaxis.set_major_locator(mdates.HourLocator(interval=2))
     else:
         ax2.xaxis.set_major_formatter(mdates.DateFormatter('%m/%d'))
