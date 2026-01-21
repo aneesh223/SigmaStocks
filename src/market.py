@@ -271,8 +271,17 @@ def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossove
     
     return technical_score, explanation
 
-def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, custom_date=None):
-    """Calculate trading verdict with time-series buy scores and recency weighting"""
+def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, custom_date=None, price_data=None):
+    """Calculate trading verdict with optimized B(t) calculation and rolling window Final_Buy_Scores
+    
+    Args:
+        ticker: Stock ticker symbol
+        sentiment_df: DataFrame with sentiment analysis results
+        strategy: "value" or "momentum" strategy
+        lookback_days: Number of days to look back
+        custom_date: Custom date for analysis (for backtesting)
+        price_data: Optional DataFrame with price data (for backtesting injection)
+    """
     if sentiment_df.empty:
         return {
             'Sentiment_Health': 5.0,
@@ -290,10 +299,15 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
     
     period = period_map.get(lookback_days, "1y" if lookback_days > 180 else "1mo")
     
-    print(f"Fetching {period} of market data for analysis...")
-    
-    # Get stock data with caching
-    stock_data = get_stock_data(ticker, period=period)
+    # Use injected price data if provided (for backtesting), otherwise fetch from yfinance
+    if price_data is not None:
+        print(f"Using injected price data for backtesting analysis...")
+        stock_data = price_data.copy()
+    else:
+        print(f"Fetching {period} of market data for analysis...")
+        # Get stock data with caching
+        stock_data = get_stock_data(ticker, period=period)
+        
     if stock_data.empty:
         return {
             'Sentiment_Health': 5.0,
@@ -303,34 +317,27 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Strategy': "N/A"
         }
     
-    # Optimized date filtering
+    # Optimized date filtering (still apply filtering logic even with injected data)
     stock_data_filtered = _filter_stock_data(stock_data, lookback_days, custom_date)
     
     if stock_data_filtered.empty:
         # print(f"Warning: No price data found within {lookback_days} day timeframe, using available data")  # Hidden from user
         stock_data_filtered = stock_data
     
-    # print(f"Using {len(stock_data_filtered)} days of price data (requested: {lookback_days} days)")  # Hidden from user
-    # if not stock_data_filtered.empty:
-    #     start_date = stock_data_filtered.index.min()
-    #     end_date = stock_data_filtered.index.max()
-    #     print(f"Price data range: {start_date.strftime('%Y-%m-%d %H:%M')} to {end_date.strftime('%Y-%m-%d %H:%M')}")  # Hidden from user
-    
     # Get closing prices for technical analysis
     prices = stock_data_filtered['Close']
     strategy_name = "MOMENTUM" if strategy.lower() == "momentum" else "VALUE"
     
-    # Calculate B(t) = Buy Score at each time t
-    buy_scores_over_time = []
-    timestamps = []
+    # STEP 1: Calculate all B(t) values first (one pass through sentiment data)
+    buy_scores_at_t = []  # List of (timestamp, B(t)) tuples
     
-    # Iterate through each time period in sentiment_df
+    print(f"Calculating B(t) values for {len(sentiment_df)} time periods...")
+    
     for timestamp, row in sentiment_df.iterrows():
-        # Get sentiment at time t
-        sentiment_t = row['Compound_Score']
-        sentiment_health_t = (sentiment_t + 1) * 5  # Convert to 0-10 scale
+        sentiment_score = row['Compound_Score']
+        sentiment_health = (sentiment_score + 1) * 5  # Convert to 0-10 scale
         
-        # Handle timezone-aware comparisons
+        # Handle timezone-aware comparisons for price data
         if hasattr(timestamp, 'tz_localize') and timestamp.tz is None:
             # Make timestamp timezone-aware to match price data
             if not prices.index.empty and prices.index.tz is not None:
@@ -388,15 +395,14 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             else:
                 technical_score_t = 5.0  # Neutral if not enough data
         
-        # Calculate B(t) = Buy Score at time t
-        sentiment_penalty = 0.5 if sentiment_t < -0.5 else 1.0
-        buy_score_t = ((technical_score_t * 0.6) + (sentiment_health_t * 0.4)) * sentiment_penalty
+        # Calculate B(t) for this timestamp
+        sentiment_penalty = 0.5 if sentiment_score < -0.5 else 1.0
+        buy_score_t = ((technical_score_t * 0.6) + (sentiment_health * 0.4)) * sentiment_penalty
         buy_score_t = np.clip(buy_score_t, 1.0, 10.0)
         
-        buy_scores_over_time.append(buy_score_t)
-        timestamps.append(timestamp)
+        buy_scores_at_t.append((timestamp, buy_score_t))
     
-    if not buy_scores_over_time:
+    if not buy_scores_at_t:
         return {
             'Sentiment_Health': 5.0,
             'Technical_Score': 5.0,
@@ -405,42 +411,66 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Strategy': strategy_name
         }
     
-    # Apply recency bias to Final Buy Score calculation
-    buy_scores_array = np.array(buy_scores_over_time)
+    # STEP 2: Calculate Final_Buy_Score at each time t using rolling window of B(t) values
+    final_buy_scores_over_time = []
+    timestamps = []
     
-    # Create recency weights (more recent = higher weight)
-    # Use exponential decay: weight = exp(-decay_rate * days_ago)
-    decay_rate = 0.1  # Adjust this to control how much recency matters
+    # Define rolling window size (in days) - shorter window for more responsiveness
+    rolling_window_days = min(lookback_days if lookback_days > 1 else 3, 5)  # Max 5 days, min 3 days
     
-    if len(timestamps) > 1:
-        # Calculate days ago for each timestamp
-        if custom_date:
-            reference_date = custom_date
+    print(f"Calculating Final_Buy_Scores using {rolling_window_days}-day rolling window...")
+    
+    for i, (timestamp, _) in enumerate(buy_scores_at_t):
+        timestamps.append(timestamp)
+        
+        # Define the rolling window: from (t - rolling_window_days) to t
+        window_start = timestamp - pd.Timedelta(days=rolling_window_days)
+        
+        # Get B(t) values within the rolling window
+        window_buy_scores = []
+        window_timestamps = []
+        
+        for window_ts, window_buy_score in buy_scores_at_t:
+            if window_ts >= window_start and window_ts <= timestamp:
+                window_buy_scores.append(window_buy_score)
+                window_timestamps.append(window_ts)
+        
+        if not window_buy_scores:
+            # If no B(t) values in window, use neutral score
+            final_buy_scores_over_time.append(5.0)
+            continue
+        
+        # Apply recency weighting within the rolling window
+        window_buy_scores_array = np.array(window_buy_scores)
+        decay_rate = 0.5  # Much higher decay rate - recent data gets much more weight
+        
+        if len(window_timestamps) > 1:
+            # Calculate days ago for each timestamp in the window (relative to current timestamp)
+            days_ago = []
+            for window_ts in window_timestamps:
+                if hasattr(window_ts, 'date') and hasattr(timestamp, 'date'):
+                    days_diff = (timestamp.date() - window_ts.date()).days
+                else:
+                    days_diff = len(window_timestamps) - window_timestamps.index(window_ts) - 1
+                days_ago.append(max(0, days_diff))
+            
+            # Calculate recency weights (more recent = higher weight)
+            recency_weights = np.exp(-decay_rate * np.array(days_ago))
+            recency_weights = recency_weights / np.sum(recency_weights)  # Normalize
+            
+            # Final Buy Score at time t = Recency-weighted average of window B(t) scores
+            final_buy_score_t = np.sum(window_buy_scores_array * recency_weights)
         else:
-            reference_date = datetime.now()
+            final_buy_score_t = window_buy_scores_array[0]
         
-        days_ago = []
-        for ts in timestamps:
-            if hasattr(ts, 'date'):
-                ts_date = ts.date() if hasattr(ts, 'date') else ts
-                ref_date = reference_date.date() if hasattr(reference_date, 'date') else reference_date
-                days_diff = (ref_date - ts_date).days
-            else:
-                days_diff = len(timestamps) - timestamps.index(ts) - 1  # Fallback: position-based
-            days_ago.append(max(0, days_diff))
-        
-        # Calculate recency weights
-        recency_weights = np.exp(-decay_rate * np.array(days_ago))
-        recency_weights = recency_weights / np.sum(recency_weights)  # Normalize
-        
-        # Final Buy Score = Recency-weighted average of B(t)
-        final_buy_score = np.sum(buy_scores_array * recency_weights)
-    else:
-        final_buy_score = buy_scores_array[0]
+        final_buy_scores_over_time.append(final_buy_score_t)
+    
+    # For the main program display, use the most recent Final_Buy_Score
+    final_buy_score = final_buy_scores_over_time[-1]
     
     # Calculate summary statistics for explanation
     avg_sentiment = sentiment_df['Compound_Score'].mean()
-    avg_technical = np.mean([score for score in buy_scores_over_time])  # This is approximate
+    avg_technical = np.mean([score for score in final_buy_scores_over_time])  # Average of Final_Buy_Scores
     
     # Optimized sentiment description using numpy
     sentiment_thresholds = np.array([-0.3, -0.1, 0.1, 0.3])
@@ -455,22 +485,41 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
         'Technical_Score': round(avg_technical, 1),
         'Final_Buy_Score': round(final_buy_score, 1),
         'Explanation': explanation,
-        'Strategy': strategy_name
+        'Strategy': strategy_name,
+        'Final_Buy_Scores_Over_Time': list(zip(timestamps, final_buy_scores_over_time))  # Final_Buy_Score at each time t
     }
 
 def _filter_stock_data(stock_data, lookback_days, custom_date):
-    """Optimized stock data filtering helper function"""
+    """Optimized stock data filtering helper function with robust timezone handling for Alpaca data"""
     if lookback_days <= 1:
         # For 1-day analysis, filter to only that specific day
         target_date = custom_date.date() if custom_date else datetime.now().date()
         
         if not stock_data.empty:
             if stock_data.index.tz is not None:
-                # Timezone-aware filtering
+                # Timezone-aware filtering (handles Alpaca UTC timestamps)
                 target_start = datetime.combine(target_date, datetime.min.time())
                 target_end = datetime.combine(target_date, datetime.max.time())
-                target_start = pytz.utc.localize(target_start).astimezone(stock_data.index.tz)
-                target_end = pytz.utc.localize(target_end).astimezone(stock_data.index.tz)
+                
+                # Convert to UTC first, then to data timezone
+                try:
+                    if hasattr(stock_data.index.tz, 'zone') and stock_data.index.tz.zone == 'UTC':
+                        # Data is already in UTC
+                        target_start = pytz.utc.localize(target_start)
+                        target_end = pytz.utc.localize(target_end)
+                    elif str(stock_data.index.tz) == 'UTC':
+                        # Data is already in UTC (fallback check)
+                        target_start = pytz.utc.localize(target_start)
+                        target_end = pytz.utc.localize(target_end)
+                    else:
+                        # Convert to data timezone
+                        target_start = pytz.utc.localize(target_start).astimezone(stock_data.index.tz)
+                        target_end = pytz.utc.localize(target_end).astimezone(stock_data.index.tz)
+                except AttributeError:
+                    # Fallback for timezone objects without 'zone' attribute
+                    target_start = pytz.utc.localize(target_start)
+                    target_end = pytz.utc.localize(target_end)
+                
                 return stock_data[(stock_data.index >= target_start) & (stock_data.index <= target_end)]
             else:
                 # Non-timezone aware filtering
@@ -479,12 +528,32 @@ def _filter_stock_data(stock_data, lookback_days, custom_date):
         # Multi-day analysis
         cutoff_date = (custom_date or datetime.now()) - timedelta(days=lookback_days)
         
-        # Handle timezone awareness
+        # Handle timezone awareness with robust Alpaca UTC support
         if not stock_data.empty and stock_data.index.tz is not None:
             if cutoff_date.tzinfo is None:
-                cutoff_date = pytz.utc.localize(cutoff_date).astimezone(stock_data.index.tz)
+                # Convert naive datetime to UTC first, then to data timezone
+                try:
+                    if hasattr(stock_data.index.tz, 'zone') and stock_data.index.tz.zone == 'UTC':
+                        cutoff_date = pytz.utc.localize(cutoff_date)
+                    elif str(stock_data.index.tz) == 'UTC':
+                        cutoff_date = pytz.utc.localize(cutoff_date)
+                    else:
+                        cutoff_date = pytz.utc.localize(cutoff_date).astimezone(stock_data.index.tz)
+                except AttributeError:
+                    # Fallback for timezone objects without 'zone' attribute
+                    cutoff_date = pytz.utc.localize(cutoff_date)
             else:
-                cutoff_date = cutoff_date.astimezone(stock_data.index.tz)
+                # Convert timezone-aware datetime to data timezone
+                try:
+                    if hasattr(stock_data.index.tz, 'zone') and stock_data.index.tz.zone == 'UTC':
+                        cutoff_date = cutoff_date.astimezone(pytz.utc)
+                    elif str(stock_data.index.tz) == 'UTC':
+                        cutoff_date = cutoff_date.astimezone(pytz.utc)
+                    else:
+                        cutoff_date = cutoff_date.astimezone(stock_data.index.tz)
+                except AttributeError:
+                    # Fallback for timezone objects without 'zone' attribute
+                    cutoff_date = cutoff_date.astimezone(pytz.utc)
         
         return stock_data[stock_data.index >= cutoff_date]
     
@@ -511,8 +580,9 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
         if hasattr(end_date, 'date'):
             end_date = end_date.date()
             
-        # Add buffer for price data (but not into the future)
-        end_date = min(end_date + timedelta(days=1), datetime.now().date())
+        # For price data, always fetch up to the current date to get the latest market data
+        # This ensures we show the most recent price even if sentiment data is older
+        price_end_date = datetime.now().date()
         
         # Get stock data
         stock = yf.Ticker(ticker)
@@ -521,12 +591,12 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
         if timeframe_days <= 1:
             interval = "1h"
             # Use specific date range instead of period to avoid extra buffer
-            price_data = stock.history(start=start_date, end=end_date, interval=interval)
-            # print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")  # Hidden from user
+            price_data = stock.history(start=start_date, end=price_end_date + timedelta(days=1), interval=interval)
+            # print(f"Fetched price data using date range {start_date} to {price_end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")  # Hidden from user
         else:
             interval = "1d"
-            price_data = stock.history(start=start_date, end=end_date, interval=interval)
-            # print(f"Fetched price data using date range {start_date} to {end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")  # Hidden from user
+            price_data = stock.history(start=start_date, end=price_end_date + timedelta(days=1), interval=interval)
+            # print(f"Fetched price data using date range {start_date} to {price_end_date}, interval='{interval}': {len(price_data) if not price_data.empty else 0} records")  # Hidden from user
         
         if price_data.empty:
             print("No market data found for the given date range")
@@ -616,18 +686,6 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
         
         # Merge sentiment and price data first
         merged_df = sentiment_df.join(price_resampled[['Close', 'Volume']], how='left')
-        
-        # Filter out any future dates from merged data
-        if timeframe_days <= 1:
-            # For intraday, filter by current datetime
-            current_time = datetime.now()
-            if merged_df.index.tz is not None:
-                current_time = pytz.utc.localize(current_time).astimezone(merged_df.index.tz)
-            merged_df = merged_df[merged_df.index <= current_time]
-        else:
-            # For daily data, filter by current date
-            current_date = datetime.now().date()
-            merged_df = merged_df[merged_df.index <= current_date]
         
         # Forward fill missing prices
         merged_df['Close'] = merged_df['Close'].ffill()

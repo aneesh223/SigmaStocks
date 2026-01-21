@@ -4,10 +4,10 @@ numpy>=1.24.0
 
 # Financial data
 yfinance>=0.2.0
+alpaca-py>=0.7.0
 
 # News scraping
 gnews>=0.3.0
-alpaca-py>=0.7.0
 
 # Hybrid sentiment analysis: VADER + DistilRoBERTa
 vaderSentiment>=3.3.2

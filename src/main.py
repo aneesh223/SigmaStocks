@@ -6,11 +6,31 @@ import analyzer
 import market
 import visualizer
 
-def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, custom_date=None):
-    """Optimized stock analysis with memory efficiency"""
-    if testing_mode and custom_date:
-        print(f"\n🧪 Testing mode: {custom_date.strftime('%B %d, %Y')}")
+def get_last_trading_day(date=None):
+    """
+    Get the last trading day (Monday-Friday, excluding weekends)
     
+    Args:
+        date: Optional date to check (defaults to today)
+        
+    Returns:
+        datetime: Last trading day
+    """
+    if date is None:
+        date = datetime.now()
+    
+    # Get the weekday (0=Monday, 6=Sunday)
+    weekday = date.weekday()
+    
+    if weekday < 5:  # Monday-Friday (0-4)
+        return date
+    elif weekday == 5:  # Saturday
+        return date - timedelta(days=1)  # Go back to Friday
+    else:  # Sunday (weekday == 6)
+        return date - timedelta(days=2)  # Go back to Friday
+
+def analyze_stock(ticker, lookback_days, strategy_mode):
+    """Optimized stock analysis with memory efficiency"""
     print(f"\nAnalyzing {ticker}...")
     
     try:
@@ -30,8 +50,10 @@ def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, cust
     sentiment_df = analyzer.get_sentiment(raw_data, ticker, lookback_days)
     best_news, worst_news = analyzer.get_top_headlines_wrapper(raw_data, ticker, lookback_days)
     
-    # Optimized date filtering
-    today = custom_date if testing_mode and custom_date else datetime.now()
+    # Optimized date filtering with trading day awareness
+    today = get_last_trading_day()  # Use last trading day instead of raw datetime.now()
+    if today.date() != datetime.now().date():
+        print(f"📅 Note: Using last trading day ({today.strftime('%A, %B %d')}) - Markets closed on weekends")
         
     if lookback_days <= 1:
         cutoff_date = today.date()
@@ -47,7 +69,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode, testing_mode=False, cust
         return
     
     # Calculate verdict and display results
-    verdict = market.calculate_verdict(ticker, sentiment_df, strategy_mode.lower(), lookback_days, custom_date)
+    verdict = market.calculate_verdict(ticker, sentiment_df, strategy_mode.lower(), lookback_days)
     
     if verdict:
         print("\n" + "="*50)
@@ -76,25 +98,11 @@ def main():
     print("   📈 SIGMASTOCKS: AI SENTIMENT ANALYZER")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
-    testing_mode = False
-    custom_date = None
-    
     while True:
         ticker = input("\n🎯 Enter ticker (or 'exit'): ").upper().strip()
         
         if ticker in ['EXIT', 'QUIT', 'Q']: 
             break
-        
-        if ticker == 'DEBUG':
-            print("\n🧪 Debug mode activated")
-            try:
-                date_input = input("Enter date (YYYY-MM-DD): ").strip()
-                custom_date = datetime.strptime(date_input, "%Y-%m-%d")
-                testing_mode = True
-                print(f"✅ Debug date set: {custom_date.strftime('%Y-%m-%d')}")
-            except ValueError:
-                print("❌ Invalid date format")
-            continue
 
         if not ticker: 
             continue
@@ -125,11 +133,8 @@ def main():
             
             choice = input("Enter choice (1-4): ").strip()
             
-            # Use testing date if in testing mode, otherwise current date
-            if testing_mode and custom_date:
-                today = custom_date
-            else:
-                today = datetime.now()
+            # Use last trading day for YTD calculation
+            today = get_last_trading_day()
             
             if choice == '1':
                 lookback_days = 30
@@ -165,11 +170,7 @@ def main():
                 print("Invalid selection. Defaulting to 1 Month.")
                 lookback_days = 30
 
-        analyze_stock(ticker, lookback_days, strategy_mode, testing_mode, custom_date)
-        
-        if testing_mode:
-            testing_mode = False
-            custom_date = None
+        analyze_stock(ticker, lookback_days, strategy_mode)
 
 if __name__ == "__main__":
     main()

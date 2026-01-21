@@ -69,10 +69,15 @@ def get_profile_data(ticker):
         
         return fallback
 
-def scrape_alpaca_news(ticker, days=30):
+def scrape_alpaca_news(ticker, days=30, end_date=None):
     """
     Fetches historical news using Alpaca's Official News API (Benzinga).
     Uses RESTClient for direct API access as recommended in Alpaca documentation.
+    
+    Args:
+        ticker: Stock symbol
+        days: Number of days to look back
+        end_date: End date for news search (defaults to now)
     """
     profile_data = get_profile_data(ticker)
     
@@ -90,9 +95,13 @@ def scrape_alpaca_news(ticker, days=30):
         print(f"❌ Alpaca Client Error: {e}. Check config.py.")
         return profile_data, []
     
-    # Calculate start date
-    start_date = datetime.now(pytz.utc) - timedelta(days=days)
-    end_date = datetime.now(pytz.utc)
+    # Calculate date range - support historical backtesting
+    if end_date is None:
+        end_date = datetime.now(pytz.utc)
+    elif not hasattr(end_date, 'tzinfo') or end_date.tzinfo is None:
+        end_date = pytz.utc.localize(end_date)
+    
+    start_date = end_date - timedelta(days=days)
     
     try:
         parsed = []
@@ -147,11 +156,18 @@ def scrape_alpaca_news(ticker, days=30):
         print(f"❌ Alpaca News Error: {e}")
         return profile_data, []
 
-def scrape_gnews(ticker, days=30):
-    """Legacy GNews scraping logic"""
+def scrape_gnews(ticker, days=30, end_date=None):
+    """Legacy GNews scraping logic with historical date support"""
     profile_data = get_profile_data(ticker)
     parsed = []
-    cutoff_date = datetime.now(pytz.utc) - timedelta(days=days + 1)
+    
+    # Calculate date range - support historical backtesting
+    if end_date is None:
+        end_date = datetime.now(pytz.utc)
+    elif not hasattr(end_date, 'tzinfo') or end_date.tzinfo is None:
+        end_date = pytz.utc.localize(end_date)
+    
+    cutoff_date = end_date - timedelta(days=days + 1)
 
     # Helper to parse GNews dates
     def _parse_gnews_date(date_str):
@@ -196,15 +212,20 @@ def scrape_gnews(ticker, days=30):
         print(f"GNews Error: {e}")
         return profile_data, []
 
-def scrape_hybrid(ticker, days=30):
+def scrape_hybrid(ticker, days=30, end_date=None):
     """
     OPTIMIZED COMBINED SCRAPER: Fetches from both Alpaca and Google News.
     Uses memory-efficient deduplication and parallel processing.
+    
+    Args:
+        ticker: Stock symbol
+        days: Number of days to look back
+        end_date: End date for news search (defaults to now, supports historical backtesting)
     """
     # 1. Fetch from Alpaca (Fast, reliable, structured) - parallel execution
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        alpaca_future = executor.submit(scrape_alpaca_news, ticker, days)
-        gnews_future = executor.submit(scrape_gnews, ticker, days)
+        alpaca_future = executor.submit(scrape_alpaca_news, ticker, days, end_date)
+        gnews_future = executor.submit(scrape_gnews, ticker, days, end_date)
         
         # Get results
         profile_data, alpaca_news = alpaca_future.result()
