@@ -24,9 +24,9 @@ def run_backtest(ticker, strategy, date_range, cash=10000):
     # Parse date range
     if ' ' in date_range:
         start_date, end_date = date_range.split(' ')
-        cmd = ['python3', 'backtest.py', ticker, strategy, start_date, end_date, str(cash), '--no-plot']
+        cmd = ['python3', 'run_backtest.py', ticker, strategy, start_date, end_date, str(cash), '--no-plot']
     else:
-        cmd = ['python3', 'backtest.py', ticker, strategy, str(date_range), str(cash), '--no-plot']
+        cmd = ['python3', 'run_backtest.py', ticker, strategy, str(date_range), str(cash), '--no-plot']
     # Explicitly add --no-plot flag for batch mode
     
     print(f"\n{'='*60}")

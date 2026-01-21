@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 SigmaStocks Quick Backtesting CLI
-Usage: python backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
+Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
 
 Examples:
-  python backtest.py TSLA m 5           # TSLA, momentum, last 5 periods (days)
-  python backtest.py AAPL v 90          # AAPL, value, last 90 days  
-  python backtest.py NVDA m 2023-01-20 2023-07-20  # Custom date range
-  python backtest.py TSLA m 30 15000 --plot --save  # With custom cash, plot, and save
+  python run_backtest.py TSLA m 5           # TSLA, momentum, last 5 periods (days)
+  python run_backtest.py AAPL v 90          # AAPL, value, last 90 days  
+  python run_backtest.py NVDA m 2023-01-20 2023-07-20  # Custom date range
+  python run_backtest.py TSLA m 30 15000 --plot --save  # With custom cash, plot, and save
 """
 
 import sys
@@ -53,12 +53,12 @@ def main():
     """Command-line backtesting interface"""
     
     if len(sys.argv) < 4:
-        print("❌ Usage: python backtest.py <ticker> <strategy> <period> [cash] [--plot] [--no-plot] [--save]")
+        print("❌ Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--no-plot] [--save]")
         print("\nExamples:")
-        print("  python backtest.py TSLA m 30")
-        print("  python backtest.py AAPL v 90")
-        print("  python backtest.py NVDA m 2023-01-20 2023-07-20")
-        print("  python backtest.py TSLA m 30 15000 --no-plot --save")
+        print("  python run_backtest.py TSLA m 30")
+        print("  python run_backtest.py AAPL v 90")
+        print("  python run_backtest.py NVDA m 2023-01-20 2023-07-20")
+        print("  python run_backtest.py TSLA m 30 15000 --no-plot --save")
         print("\nStrategy: m/momentum or v/value")
         print("Period: number of days OR start-date end-date")
         print("Flags: --plot (force plot), --no-plot (disable plot), --save (save results)")

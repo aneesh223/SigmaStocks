@@ -13,32 +13,32 @@ def show_examples():
     examples = [
         {
             'title': 'Basic Momentum Test (30 days)',
-            'command': 'python backtest.py TSLA m 30',
+            'command': 'python run_backtest.py TSLA m 30',
             'description': 'Test TSLA with momentum strategy over last 30 days'
         },
         {
             'title': 'Value Strategy (6 months)',
-            'command': 'python backtest.py AAPL v 180',
+            'command': 'python run_backtest.py AAPL v 180',
             'description': 'Test AAPL with value strategy over 6 months'
         },
         {
             'title': 'Custom Date Range',
-            'command': 'python backtest.py NVDA m 2023-01-20 2023-07-20',
+            'command': 'python run_backtest.py NVDA m 2023-01-20 2023-07-20',
             'description': 'Test NVDA momentum strategy for specific period'
         },
         {
             'title': 'High Capital Test',
-            'command': 'python backtest.py MSFT m 90 50000',
+            'command': 'python run_backtest.py MSFT m 90 50000',
             'description': 'Test MSFT with $50,000 starting capital'
         },
         {
             'title': 'Full Analysis (Plot + Save)',
-            'command': 'python backtest.py TSLA m 60 --plot --save',
+            'command': 'python run_backtest.py TSLA m 60 --plot --save',
             'description': 'Run backtest with charts and save results to file'
         },
         {
             'title': 'Quick Comparison',
-            'command': 'python backtest.py AAPL m 30 && python backtest.py AAPL v 30',
+            'command': 'python run_backtest.py AAPL m 30 && python run_backtest.py AAPL v 30',
             'description': 'Compare momentum vs value strategies'
         }
     ]

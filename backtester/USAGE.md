@@ -2,16 +2,16 @@
 
 ## Basic Usage
 ```bash
-python backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
+python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
 ```
 
 ## Examples
 ```bash
 # Quick test
-python backtest.py TSLA m 2023-01-20 2023-07-20
+python run_backtest.py TSLA m 2023-01-20 2023-07-20
 
 # With custom capital and charts
-python backtest.py AAPL v 90 25000 --plot --save
+python run_backtest.py AAPL v 90 25000 --plot --save
 
 # See all examples
 python examples.py

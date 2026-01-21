@@ -132,7 +132,7 @@ The revolutionary hybrid approach combines two complementary AI models:
 5. View results and interactive charts with trading signals
 
 ### Historical Backtesting
-1. **Single Backtest**: `python backtester/backtest.py TSLA m 30`
+1. **Single Backtest**: `python backtester/run_backtest.py TSLA m 30`
    - Format: `<ticker> <strategy> <period> [cash] [--plot] [--save]`
    - Strategy: `v` (VALUE) or `m` (MOMENTUM)
    - Period: Number of days to backtest
@@ -191,10 +191,10 @@ The revolutionary hybrid approach combines two complementary AI models:
 ### CLI Usage Examples
 ```bash
 # Basic backtest: TSLA momentum strategy, 30 days
-python backtester/backtest.py TSLA m 30
+python backtester/run_backtest.py TSLA m 30
 
 # Advanced backtest: AAPL value strategy, 180 days, $50k capital, save results
-python backtester/backtest.py AAPL v 180 50000 --save
+python backtester/run_backtest.py AAPL v 180 50000 --save
 
 # Batch testing multiple configurations
 python backtester/batch_backtest.py
