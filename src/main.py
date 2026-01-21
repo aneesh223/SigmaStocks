@@ -72,6 +72,9 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
     verdict = market.calculate_verdict(ticker, sentiment_df, strategy_mode.lower(), lookback_days)
     
     if verdict:
+        # Get trading recommendation using backtester-proven logic
+        trading_rec = market.get_trading_recommendation(ticker, verdict['Final_Buy_Score'], sentiment_df)
+        
         print("\n" + "="*50)
         print(f"   ANALYSIS FOR {company_name} ({ticker})")
         print("="*50)
@@ -83,7 +86,19 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
         print(f"Market Analysis:    {verdict['Technical_Score']:.1f}/10")
         print("-" * 50)
         print(f"FINAL BUY SCORE:    {verdict['Final_Buy_Score']:.1f}/10")
+        
+        # Display trading recommendation with market regime
+        rec_color = "🟢" if trading_rec['recommendation'] == "BUY" else "🔴" if trading_rec['recommendation'] == "SELL" else "🟡"
+        print(f"TRADING SIGNAL:     {rec_color} {trading_rec['recommendation']} ({trading_rec['confidence']:.0f}% confidence)")
+        print(f"Market Regime:      {trading_rec['market_regime']}")
+        
+        # Display adaptive thresholds
+        risk_params = trading_rec['risk_params']
+        print(f"Adaptive Thresholds: Buy≥{trading_rec['buy_threshold']:.3f}, Sell≤{trading_rec['sell_threshold']:.3f}")
+        print(f"Risk Management:    Stop-loss {risk_params['stop_loss_pct']*100:+.0f}%, Take-profit {risk_params['take_profit_pct']*100:+.0f}%")
+        
         print(f"\nREASONING:\n{verdict['Explanation']}")
+        print(f"Signal Logic: {trading_rec['reasoning']}")
         print("-" * 50)
         print(f"TOP POSITIVE NEWS:\n>> {best_news}")
         print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")

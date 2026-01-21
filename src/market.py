@@ -713,3 +713,35 @@ def get_visualization_data(ticker, sentiment_df, timeframe_days=30):
     except Exception as e:
         print(f"Error fetching market data for visualization: {e}")
         return sentiment_df
+
+def detect_market_regime(ticker: str, lookback_days: int = 60) -> str:
+    """
+    Detect current market regime using shared logic
+    Automatically stays in sync with any improvements
+    """
+    from logic import detect_market_regime as shared_detect_market_regime
+    return shared_detect_market_regime(ticker=ticker, lookback_days=lookback_days)
+
+def get_adaptive_risk_params(market_regime: str) -> dict:
+    """
+    Get risk parameters using shared logic
+    Automatically stays in sync with any improvements
+    """
+    from logic import get_adaptive_risk_params as shared_get_adaptive_risk_params
+    return shared_get_adaptive_risk_params(market_regime)
+
+def calculate_adaptive_thresholds(score_history: list, market_regime: str, lookback: int = 20) -> tuple:
+    """
+    Calculate adaptive thresholds using shared logic
+    Automatically stays in sync with any improvements
+    """
+    from logic import calculate_adaptive_thresholds as shared_calculate_adaptive_thresholds
+    return shared_calculate_adaptive_thresholds(score_history, market_regime, lookback)
+
+def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df: pd.DataFrame) -> dict:
+    """
+    Convert Final_Buy_Score into concrete BUY/HOLD/SELL recommendation
+    Uses shared logic for consistency
+    """
+    from logic import get_trading_recommendation as shared_get_trading_recommendation
+    return shared_get_trading_recommendation(ticker, final_buy_score, sentiment_df)

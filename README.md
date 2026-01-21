@@ -32,6 +32,13 @@ A sophisticated stock analysis tool that combines advanced technical analysis wi
 - **Multiple Timeframes**: 1D, 5D, 1M, 6M analysis periods with strategy-specific restrictions
 - **Performance Optimized**: Memory-efficient processing with intelligent caching
 
+### Concrete Trading Recommendations
+- **BUY/HOLD/SELL Signals**: Clear actionable recommendations with confidence percentages
+- **Market Regime Detection**: Automatic BULL/BEAR/SIDEWAYS market identification
+- **Adaptive Thresholds**: Dynamic buy/sell thresholds that adjust to market conditions
+- **Risk Management**: Regime-specific stop-loss and take-profit recommendations
+- **Backtester-Proven Logic**: Uses the same algorithms validated in historical testing
+
 ### Comprehensive Backtesting System
 - **Historical Analysis**: Test strategies against years of Alpaca market data
 - **Realistic Simulation**: Day-by-day execution with no look-ahead bias
@@ -41,6 +48,14 @@ A sophisticated stock analysis tool that combines advanced technical analysis wi
 - **CLI Interface**: Streamlined command-line backtesting with batch processing
 
 ## 📊 Technical Specifications
+
+### Shared Logic Architecture
+The system uses a unified logic module (`src/logic.py`) that ensures consistency between the main program and backtester:
+
+- **Single Source of Truth**: All trading algorithms are centralized in one module
+- **Automatic Synchronization**: Changes to logic automatically apply to both systems
+- **Proven Algorithms**: Logic is validated through extensive backtesting before deployment
+- **Maintainable Code**: No duplication of complex trading algorithms
 
 ### Time-Series Algorithm Architecture
 The system uses a sophisticated rolling window approach:
@@ -152,7 +167,10 @@ The revolutionary hybrid approach combines two complementary AI models:
 - **Market Sentiment**: 0-10 scale based on hybrid AI sentiment analysis
 - **Market Analysis**: 0-10 based on chosen strategy algorithms
 - **Final Buy Score**: Combined score with rolling window analysis
-- **Trading Signals**: Visual buy/sell indicators on charts
+- **Trading Signal**: 🟢 BUY / 🟡 HOLD / 🔴 SELL with confidence percentage
+- **Market Regime**: BULL / BEAR / SIDEWAYS detection for adaptive thresholds
+- **Adaptive Thresholds**: Dynamic buy/sell thresholds based on market conditions
+- **Risk Management**: Regime-specific stop-loss and take-profit recommendations
 - **Top Headlines**: Best/worst sentiment-scored news with confidence scores
 
 ## 📈 Strategy Details
