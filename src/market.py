@@ -729,26 +729,35 @@ def detect_market_regime(ticker: str, lookback_days: int = 60) -> str:
     from logic import detect_market_regime as shared_detect_market_regime
     return shared_detect_market_regime(ticker=ticker, lookback_days=lookback_days)
 
-def get_adaptive_risk_params(market_regime: str) -> dict:
+def get_adaptive_risk_params(market_regime: str, strategy: str = "momentum") -> dict:
     """
-    Get risk parameters using shared logic
+    Get risk parameters using shared logic with strategy-specific optimizations
     Automatically stays in sync with any improvements
     """
     from logic import get_adaptive_risk_params as shared_get_adaptive_risk_params
-    return shared_get_adaptive_risk_params(market_regime)
+    return shared_get_adaptive_risk_params(market_regime, strategy=strategy)
 
-def calculate_adaptive_thresholds(score_history: list, market_regime: str, lookback: int = 20) -> tuple:
+def calculate_adaptive_thresholds(score_history: list, market_regime: str, lookback: int = 20, strategy: str = "momentum") -> tuple:
     """
-    Calculate adaptive thresholds using shared logic
+    Calculate adaptive thresholds using shared logic with strategy-specific optimizations
     Automatically stays in sync with any improvements
     """
     from logic import calculate_adaptive_thresholds as shared_calculate_adaptive_thresholds
-    return shared_calculate_adaptive_thresholds(score_history, market_regime, lookback)
+    return shared_calculate_adaptive_thresholds(score_history, market_regime, lookback, strategy)
 
-def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df: pd.DataFrame) -> dict:
+def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df: pd.DataFrame, strategy: str = "momentum") -> dict:
     """
     Convert Final_Buy_Score into concrete BUY/HOLD/SELL recommendation
-    Uses shared logic for consistency
+    Uses shared logic for consistency with strategy-specific optimizations and bull market duration scaling
     """
     from logic import get_trading_recommendation as shared_get_trading_recommendation
-    return shared_get_trading_recommendation(ticker, final_buy_score, sentiment_df)
+    
+    # Get price data for bull market duration calculation
+    import yfinance as yf
+    try:
+        stock = yf.Ticker(ticker)
+        price_data = stock.history(period="6mo")  # 6 months for regime detection
+    except:
+        price_data = None
+    
+    return shared_get_trading_recommendation(ticker, final_buy_score, sentiment_df, price_data, strategy=strategy)
