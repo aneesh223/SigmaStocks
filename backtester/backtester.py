@@ -63,6 +63,8 @@ class AlpacaBacktester:
         self.trade_log = []
         self.score_history = []  # Track Final_Buy_Scores for conviction calculation
         self.last_buy_date = None  # Track last buy date for minimum holding period
+        self.first_buy_date = None  # Track first buy date for fair buy-and-hold comparison
+        self.first_buy_price = None  # Track first buy price for fair buy-and-hold comparison
         
         # Risk management
         self.entry_price = None  # Track entry price for stop-loss/take-profit
@@ -273,6 +275,11 @@ class AlpacaBacktester:
                 self.cash -= cost
                 self.shares += shares_to_buy
                 self.entry_price = price  # Track entry price for risk management
+                
+                # Track first buy for fair buy-and-hold comparison
+                if self.first_buy_date is None:
+                    self.first_buy_date = date
+                    self.first_buy_price = price
                 
                 self.trade_log.append({
                     'Date': date,
@@ -504,6 +511,11 @@ class AlpacaBacktester:
                 self.shares += shares_to_buy
                 self.entry_price = price  # Track entry price for risk management
                 self.last_buy_date = date  # Track buy date for minimum holding period
+                
+                # Track first buy for fair buy-and-hold comparison
+                if self.first_buy_date is None:
+                    self.first_buy_date = date
+                    self.first_buy_price = price
                 
                 self.trade_log.append({
                     'Date': date,
@@ -817,7 +829,8 @@ class AlpacaBacktester:
         else:
             total_return = 0
         
-        # Buy and hold comparison
+        # Buy-and-Hold Comparison: Always start on Day 1 for fair comparison
+        # Since our algorithm CAN buy on Day 1, buy-and-hold should always start on Day 1
         if len(trading_days) > 0:
             try:
                 initial_price = self.full_price_data.loc[trading_days[0], 'Close']
@@ -825,6 +838,8 @@ class AlpacaBacktester:
                     buy_hold_shares = self.initial_cash / initial_price
                     buy_hold_value = buy_hold_shares * final_price
                     buy_hold_return = ((buy_hold_value - self.initial_cash) / self.initial_cash) * 100
+                    
+                    print(f"📊 Buy-and-Hold: Started on {trading_days[0].date()} at ${initial_price:.2f} (Day 1 - fair comparison)")
                 else:
                     buy_hold_return = 0
             except (KeyError, IndexError):
