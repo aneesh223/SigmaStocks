@@ -69,7 +69,7 @@ def calculate_adaptive_profit_target(entry_price: float, current_price: float, b
     Returns:
         Adaptive profit target percentage
     """
-    if market_regime not in ["BULL", "STRONG_BULL"]:
+    if market_regime not in ["BULL", "STRONG_BULL"] or entry_price <= 0:
         return base_profit_pct
     
     # Calculate current unrealized gain
@@ -127,9 +127,16 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
         recent_data = price_data.tail(lookback_days)
         prices = recent_data['Close']
         
+        if len(prices) < 2:
+            return "SIDEWAYS"  # Need at least 2 data points
+        
         # Calculate trend metrics
         start_price = prices.iloc[0]
         end_price = prices.iloc[-1]
+        
+        if start_price <= 0:
+            return "SIDEWAYS"  # Invalid start price
+            
         total_return = (end_price - start_price) / start_price
         
         # Calculate moving averages for trend confirmation
@@ -141,7 +148,15 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
         volatility = returns.std() * (252 ** 0.5)  # Annualized volatility
         
         # Calculate momentum indicators
-        recent_momentum = (prices.iloc[-10:].mean() - prices.iloc[-20:-10].mean()) / prices.iloc[-20:-10].mean() if len(prices) >= 20 else 0
+        if len(prices) >= 20:
+            recent_10_mean = prices.iloc[-10:].mean()
+            prev_10_mean = prices.iloc[-20:-10].mean()
+            if prev_10_mean > 0:
+                recent_momentum = (recent_10_mean - prev_10_mean) / prev_10_mean
+            else:
+                recent_momentum = 0
+        else:
+            recent_momentum = 0
         
         # VOLATILITY OVERRIDE: Extreme price volatility should force SIDEWAYS classification
         extreme_volatility_threshold = 0.8  # 80% annualized volatility (lowered from 120%)
@@ -639,16 +654,28 @@ def detect_momentum_reversal(price_data: pd.DataFrame, score_history: List[float
         recent_prices = price_data.tail(lookback_days)['Close']
         recent_scores = score_history[-lookback_days:] if len(score_history) >= lookback_days else score_history
         
+        if len(recent_prices) < 2 or len(recent_scores) < 2:
+            return {'reversal_detected': False, 'type': None, 'strength': 0.0}
+        
         # PRICE MOMENTUM SIGNALS
         # 1. Price acceleration (second derivative)
         price_returns = recent_prices.pct_change().dropna()
         if len(price_returns) >= 3:
-            recent_acceleration = price_returns.iloc[-3:].mean() - price_returns.iloc[-6:-3].mean()
+            try:
+                recent_acceleration = price_returns.iloc[-3:].mean() - price_returns.iloc[-6:-3].mean()
+            except IndexError:
+                recent_acceleration = 0
         else:
             recent_acceleration = 0
             
         # 2. Price trend strength
-        price_trend = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+        try:
+            if recent_prices.iloc[0] > 0:
+                price_trend = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+            else:
+                price_trend = 0
+        except (IndexError, ZeroDivisionError):
+            price_trend = 0
         
         # 3. Price volatility (high volatility can signal reversals)
         price_volatility = price_returns.std() if len(price_returns) > 1 else 0

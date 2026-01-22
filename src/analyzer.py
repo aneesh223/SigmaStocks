@@ -134,16 +134,15 @@ def get_ai_analyzer():
         return _ai_model, _ai_tokenizer
     return None, None
 
-@lru_cache(maxsize=2000)  # Increased cache size for better hit rate
-def get_hybrid_sentiment(text):
+def get_hybrid_sentiment(text, ticker=""):
     """Hybrid sentiment analysis: DistilRoBERTa for accuracy + VADER for nuanced scoring"""
     global _cache_hits, _cache_misses
     
-    # Check global cache first for ultra-fast lookup
-    text_hash = hash(text)
-    if text_hash in _sentiment_cache:
+    # Check global cache first for ultra-fast lookup - include ticker in cache key
+    cache_key = hash(f"{ticker}_{text}")
+    if cache_key in _sentiment_cache:
         _cache_hits += 1
-        return _sentiment_cache[text_hash]
+        return _sentiment_cache[cache_key]
     
     _cache_misses += 1
     
@@ -236,11 +235,11 @@ def get_hybrid_sentiment(text):
                 result = vader_score * 0.5
     
     # Cache the result for ultra-fast future lookups
-    _sentiment_cache[text_hash] = result
+    _sentiment_cache[cache_key] = result
     
     return result
 
-def get_hybrid_sentiment_batch(texts, batch_size=32):  # Increased batch size for better GPU utilization
+def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased batch size for better GPU utilization
     """Ultra-optimized batch processing with advanced caching and memory management"""
     global _cache_hits, _cache_misses, _batch_cache
     
@@ -250,11 +249,11 @@ def get_hybrid_sentiment_batch(texts, batch_size=32):  # Increased batch size fo
         # Fallback to VADER-only batch processing
         return get_vader_sentiment_batch(texts)
     
-    # Check batch cache first
-    batch_hash = hash(tuple(texts))
-    if batch_hash in _batch_cache:
+    # Check batch cache first - include ticker in cache key
+    batch_cache_key = hash((ticker, tuple(texts)))
+    if batch_cache_key in _batch_cache:
         _cache_hits += len(texts)
-        return _batch_cache[batch_hash]
+        return _batch_cache[batch_cache_key]
     
     try:
         import torch
@@ -348,7 +347,7 @@ def get_hybrid_sentiment_batch(texts, batch_size=32):  # Increased batch size fo
                 torch.cuda.empty_cache()
         
         # Cache the batch result
-        _batch_cache[batch_hash] = results
+        _batch_cache[batch_cache_key] = results
         _cache_misses += len(texts)
         
         return results
@@ -532,9 +531,9 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
         
         if use_progress_bar:
             print("Processing headlines with optimized hybrid approach...")
-            raw_scores = get_hybrid_sentiment_batch(headlines_list, batch_size=64)  # Larger batches
+            raw_scores = get_hybrid_sentiment_batch(headlines_list, ticker, batch_size=64)  # Larger batches
         else:
-            raw_scores = get_hybrid_sentiment_batch(headlines_list, batch_size=64)
+            raw_scores = get_hybrid_sentiment_batch(headlines_list, ticker, batch_size=64)
             
         raw_scores = np.array(raw_scores, dtype=np.float32)  # Use float32 for memory efficiency
     elif vader_analyzer is not None:
@@ -682,7 +681,7 @@ def get_top_headlines(parsed_data_tuple, ticker, timeframe_days=30):
     if ai_model is not None and ai_tokenizer is not None and vader_analyzer is not None:
         # Use hybrid batch processing for better performance
         cleaned_headlines = df['Cleaned'].tolist()
-        scores = get_hybrid_sentiment_batch(cleaned_headlines, batch_size=16)
+        scores = get_hybrid_sentiment_batch(cleaned_headlines, ticker, batch_size=16)
         df['Score'] = scores
     elif vader_analyzer is not None:
         # Use VADER only
@@ -751,7 +750,6 @@ def clear_sentiment_caches():
     _cache_misses = 0
     
     # Clear LRU caches
-    get_hybrid_sentiment.cache_clear()
     clean_headline.cache_clear()
     validate_target.cache_clear()
     categorize_source.cache_clear()

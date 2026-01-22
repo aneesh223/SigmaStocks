@@ -49,6 +49,9 @@ class AlpacaBacktester:
             strategy: Trading strategy ("momentum" or "value")
             initial_cash: Starting cash amount
         """
+        if initial_cash <= 0:
+            raise ValueError("Initial cash must be greater than 0")
+        
         self.ticker = ticker.upper()
         self.strategy = strategy.lower()
         self.initial_cash = initial_cash
@@ -260,6 +263,10 @@ class AlpacaBacktester:
         """
         if action == "BUY" and self.cash > 0:
             # Buy as many shares as possible
+            if price <= 0:
+                print(f"⚠️  Warning: Invalid price {price} for BUY order, skipping...")
+                return
+                
             shares_to_buy = int(self.cash / price)
             if shares_to_buy > 0:
                 cost = shares_to_buy * price
@@ -286,7 +293,7 @@ class AlpacaBacktester:
             self.cash += proceeds
             
             # Calculate P&L for this trade
-            if self.entry_price:
+            if self.entry_price and self.entry_price > 0:
                 pnl_pct = ((price - self.entry_price) / self.entry_price) * 100
                 pnl_dollar = (price - self.entry_price) * self.shares
             else:
@@ -365,7 +372,7 @@ class AlpacaBacktester:
         Returns:
             Tuple of (should_sell, reason)
         """
-        if self.shares == 0 or self.entry_price is None:
+        if self.shares == 0 or self.entry_price is None or self.entry_price <= 0:
             return False, ""
         
         # Get adaptive risk parameters
@@ -474,6 +481,11 @@ class AlpacaBacktester:
             risk_params = self.get_adaptive_risk_params(market_regime)
             base_position_multiplier = risk_params['position_size_multiplier']
             
+            # Validate price
+            if price <= 0:
+                print(f"⚠️  Warning: Invalid price {price} for BUY order, skipping...")
+                return
+            
             # Calculate conviction score for dynamic position sizing
             from logic import calculate_conviction_score
             conviction_score = calculate_conviction_score(buy_score, self.score_history, market_regime)
@@ -520,7 +532,7 @@ class AlpacaBacktester:
             self.cash += proceeds
             
             # Calculate P&L for this trade
-            if self.entry_price:
+            if self.entry_price and self.entry_price > 0:
                 pnl_pct = ((price - self.entry_price) / self.entry_price) * 100
                 pnl_dollar = (price - self.entry_price) * self.shares
             else:
@@ -652,7 +664,16 @@ class AlpacaBacktester:
         
         for i, simulation_date in enumerate(trading_days):
             try:
-                current_price = self.full_price_data.loc[simulation_date, 'Close']
+                # Safe DataFrame access with error handling
+                try:
+                    current_price = self.full_price_data.loc[simulation_date, 'Close']
+                except (KeyError, IndexError):
+                    print(f"⚠️  Warning: No price data for {simulation_date.date()}, skipping...")
+                    continue
+                
+                if current_price <= 0:
+                    print(f"⚠️  Warning: Invalid price {current_price} for {simulation_date.date()}, skipping...")
+                    continue
                 
                 # FAST LOOKUP: Get pre-calculated Final_Buy_Score for this date
                 sim_date_key = simulation_date.date() if hasattr(simulation_date, 'date') else simulation_date
@@ -679,12 +700,19 @@ class AlpacaBacktester:
                 # MOMENTUM REVERSAL DETECTION: Check for regime changes every 5 days
                 if i > 0 and i % 5 == 0 and len(score_history) >= 10:
                     # Get recent price data for reversal detection
-                    recent_price_data = self.full_price_data.loc[:simulation_date].tail(10)
-                    recent_score_history = score_history[-10:]
-                    
-                    # Import momentum reversal detection
-                    from logic import detect_momentum_reversal
-                    reversal_info = detect_momentum_reversal(recent_price_data, recent_score_history)
+                    try:
+                        recent_price_data = self.full_price_data.loc[:simulation_date].tail(10)
+                        if len(recent_price_data) >= 5:  # Need minimum data for reversal detection
+                            recent_score_history = score_history[-10:]
+                            
+                            # Import momentum reversal detection
+                            from logic import detect_momentum_reversal
+                            reversal_info = detect_momentum_reversal(recent_price_data, recent_score_history)
+                        else:
+                            reversal_info = {'reversal_detected': False}
+                    except Exception as e:
+                        print(f"⚠️  Warning: Momentum reversal detection failed: {e}")
+                        reversal_info = {'reversal_detected': False}
                     
                     if reversal_info['reversal_detected'] and reversal_info['strength'] > 0.7:
                         # Strong reversal detected - update market regime dynamically
@@ -784,13 +812,26 @@ class AlpacaBacktester:
         final_portfolio_value = self.cash + (self.shares * final_price)
         
         # Calculate performance metrics
-        total_return = ((final_portfolio_value - self.initial_cash) / self.initial_cash) * 100
+        if self.initial_cash > 0:
+            total_return = ((final_portfolio_value - self.initial_cash) / self.initial_cash) * 100
+        else:
+            total_return = 0
         
         # Buy and hold comparison
-        initial_price = self.full_price_data.loc[trading_days[0], 'Close']
-        buy_hold_shares = self.initial_cash / initial_price
-        buy_hold_value = buy_hold_shares * final_price
-        buy_hold_return = ((buy_hold_value - self.initial_cash) / self.initial_cash) * 100
+        if len(trading_days) > 0:
+            try:
+                initial_price = self.full_price_data.loc[trading_days[0], 'Close']
+                if initial_price > 0 and self.initial_cash > 0:
+                    buy_hold_shares = self.initial_cash / initial_price
+                    buy_hold_value = buy_hold_shares * final_price
+                    buy_hold_return = ((buy_hold_value - self.initial_cash) / self.initial_cash) * 100
+                else:
+                    buy_hold_return = 0
+            except (KeyError, IndexError):
+                print("⚠️  Warning: Could not calculate buy-and-hold return due to missing price data")
+                buy_hold_return = 0
+        else:
+            buy_hold_return = 0
         
         results = {
             'ticker': self.ticker,
