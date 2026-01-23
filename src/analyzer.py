@@ -42,9 +42,9 @@ def _ensure_model():
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if device.type == "cuda":
                 _ai_model = _ai_model.to(device)
-                print(f"✅ DistilRoBERTa loaded on GPU: {torch.cuda.get_device_name(0)}")
+                print(f"DistilRoBERTa loaded on GPU: {torch.cuda.get_device_name(0)}")
             else:
-                print("✅ DistilRoBERTa loaded on CPU")
+                print("DistilRoBERTa loaded on CPU")
             
             # Set to evaluation mode for inference
             _ai_model.eval()
@@ -81,7 +81,7 @@ def _update_vader_lexicon():
     if VADER_AVAILABLE:
         # Update VADER's lexicon with our financial terms
         _vader_analyzer.lexicon.update(FINANCIAL_LEXICON)
-        print("✅ VADER enhanced with financial lexicon")
+        print("VADER enhanced with financial lexicon")
 
 # Initialize enhanced VADER
 if VADER_AVAILABLE:
@@ -262,9 +262,9 @@ def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased ba
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
             ai_model = ai_model.to(device)
-            print(f"🚀 Using GPU acceleration for hybrid analysis: {torch.cuda.get_device_name(0)}")
+            print(f"Using GPU acceleration for hybrid analysis: {torch.cuda.get_device_name(0)}")
         else:
-            print("💻 Using CPU processing for hybrid analysis")
+            print("Using CPU processing for hybrid analysis")
         
         results = []
         
@@ -665,7 +665,7 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     
     # Print final cache statistics
     hit_rate = _cache_hits / (_cache_hits + _cache_misses) * 100 if (_cache_hits + _cache_misses) > 0 else 0
-    print(f"✅ Analysis complete with {hit_rate:.1f}% cache hit rate")
+    print(f"Analysis complete with {hit_rate:.1f}% cache hit rate")
     
     return result_df
 
@@ -744,7 +744,7 @@ def clear_sentiment_caches():
     total_requests = _cache_hits + _cache_misses
     hit_rate = (_cache_hits / total_requests * 100) if total_requests > 0 else 0
     
-    print(f"🧹 Clearing sentiment caches...")
+    print(f"Clearing sentiment caches...")
     print(f"   Cache Statistics:")
     print(f"   - Total requests: {total_requests:,}")
     print(f"   - Cache hits: {_cache_hits:,}")
@@ -765,7 +765,7 @@ def clear_sentiment_caches():
     categorize_source.cache_clear()
     get_top_headlines.cache_clear()
     
-    print("✅ All caches cleared")
+    print("All caches cleared")
 
 def get_cache_stats():
     """Get current cache statistics"""

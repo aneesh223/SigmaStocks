@@ -498,7 +498,7 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
         final_buy_scores_over_time.append(final_buy_score_t)
     
     optimization_time = time.time() - start_time
-    print(f"✅ Optimized calculation completed in {optimization_time:.3f} seconds (O(N) complexity)")
+    print(f"Optimized calculation completed in {optimization_time:.3f} seconds (O(N) complexity)")
     
     # For the main program display, use the most recent Final_Buy_Score
     final_buy_score = final_buy_scores_over_time[-1]

@@ -92,7 +92,7 @@ def scrape_alpaca_news(ticker, days=30, end_date=None):
             secret_key=config.API_SECRET
         )
     except Exception as e:
-        print(f"❌ Alpaca Client Error: {e}. Check config.py.")
+        print(f"Alpaca Client Error: {e}. Check config.py.")
         return profile_data, []
     
     # Calculate date range - support historical backtesting
@@ -153,7 +153,7 @@ def scrape_alpaca_news(ticker, days=30, end_date=None):
         return profile_data, parsed
 
     except Exception as e:
-        print(f"❌ Alpaca News Error: {e}")
+        print(f"Alpaca News Error: {e}")
         return profile_data, []
 
 def scrape_gnews(ticker, days=30, end_date=None):

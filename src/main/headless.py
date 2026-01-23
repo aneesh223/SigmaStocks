@@ -29,7 +29,7 @@ sys.path.insert(0, root_dir)    # Add project root to path
 try:
     from input import analyze_stock
 except ImportError:
-    print("❌ Error: Could not import 'input.py'. Make sure you're running from the correct directory.")
+    print("Error: Could not import 'input.py'. Make sure you're running from the correct directory.")
     print("   Try: python src/main/headless.py <ticker> <strategy> <period>")
     sys.exit(1)
 
@@ -49,7 +49,7 @@ def parse_period(period_arg, next_arg=None):
 
 def main():
     if len(sys.argv) < 3:
-        print("❌ Usage: python headless.py <ticker> <strategy> <period> [--save]")
+        print("Usage: python headless.py <ticker> <strategy> <period> [--save]")
         print("Example: python headless.py TSLA m 30 --save")
         return 1
     
@@ -71,7 +71,7 @@ def main():
     # We check all arguments for the flag
     save_plot = '--save' in sys.argv
     
-    print(f"\n🚀 Orthrus Headless Analysis: {ticker}")
+    print(f"\nOrthrus Headless Analysis: {ticker}")
     print("-" * 50)
     
     try:
@@ -83,16 +83,16 @@ def main():
             # Manually save the current figure since show() didn't clear it
             filename = f"analysis_{ticker}_{strategy}_{datetime.now().strftime('%Y%m%d')}.png"
             plt.savefig(filename)
-            print(f"\n💾 Plot saved to: {filename}")
+            print(f"\nPlot saved to: {filename}")
             
-        print(f"\n✅ Analysis Complete.")
+        print(f"\nAnalysis Complete.")
         return 0
         
     except KeyboardInterrupt:
-        print("\n⚠️  Analysis interrupted.")
+        print("\nAnalysis interrupted.")
         return 0
     except Exception as e:
-        print(f"\n❌ Fatal Error: {e}")
+        print(f"\nFatal Error: {e}")
         return 1
 
 if __name__ == "__main__":

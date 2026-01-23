@@ -50,7 +50,7 @@ def calculate_bull_market_duration(price_data: pd.DataFrame, current_regime: str
             return len(rolling_returns) - bull_start_idx
             
     except Exception as e:
-        print(f"⚠️  Bull market duration calculation failed: {e}")
+        print(f"Bull market duration calculation failed: {e}")
         return 0
 
 
@@ -159,7 +159,7 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
             recent_momentum = 0
         
         # DEBUG: Print key metrics for analysis
-        print(f"🔍 REGIME DETECTION DEBUG: return={total_return:.1%}, volatility={volatility:.1%}, momentum={recent_momentum:.1%}, price_vs_sma20={end_price > sma_20}")
+        print(f"REGIME DETECTION DEBUG: return={total_return:.1%}, volatility={volatility:.1%}, momentum={recent_momentum:.1%}, price_vs_sma20={end_price > sma_20}")
         
         # VOLATILITY OVERRIDE: Extreme price volatility should force SIDEWAYS classification
         # BUT: Allow higher volatility during strong uptrends (bull markets deserve volatility tolerance)
@@ -184,13 +184,13 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
                 # Strong recent bull market with momentum - allow higher volatility
                 bull_volatility_threshold = min(1.5, extreme_volatility_threshold * 2.0)  # Up to 150% volatility allowed
                 if volatility <= bull_volatility_threshold:
-                    print(f"🚀 BULL MARKET VOLATILITY TOLERANCE: {volatility:.1%} volatility allowed due to recent strong uptrend (+{recent_20_return:.1%} 20-day return, momentum: {recent_momentum:.1%})")
+                    print(f"BULL MARKET VOLATILITY TOLERANCE: {volatility:.1%} volatility allowed due to recent strong uptrend (+{recent_20_return:.1%} 20-day return, momentum: {recent_momentum:.1%})")
                     # Continue with normal bull market detection below
                 else:
-                    print(f"⚠️  EXTREME VOLATILITY OVERRIDE: {volatility:.1%} exceeds bull market tolerance ({bull_volatility_threshold:.1%}) - forcing SIDEWAYS regime")
+                    print(f"EXTREME VOLATILITY OVERRIDE: {volatility:.1%} exceeds bull market tolerance ({bull_volatility_threshold:.1%}) - forcing SIDEWAYS regime")
                     return "SIDEWAYS"
             else:
-                print(f"⚠️  EXTREME PRICE VOLATILITY DETECTED: {volatility:.1%} annualized - forcing SIDEWAYS regime to prevent overtrading")
+                print(f"EXTREME PRICE VOLATILITY DETECTED: {volatility:.1%} annualized - forcing SIDEWAYS regime to prevent overtrading")
                 print(f"    Recent 20-day return: {recent_20_return:.1%}, momentum: {recent_momentum:.1%}")
                 return "SIDEWAYS"
         
@@ -213,7 +213,7 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
             return "SIDEWAYS"  # Neutral market
             
     except Exception as e:
-        print(f"⚠️  Market regime detection failed: {e}")
+        print(f"Market regime detection failed: {e}")
         return "SIDEWAYS"  # Safe default
 
 
@@ -250,7 +250,7 @@ def calculate_price_volatility(ticker: str = None, price_data: pd.DataFrame = No
         return max(0.1, min(volatility, 3.0))  # Clamp between 10% and 300%
         
     except Exception as e:
-        print(f"⚠️  Price volatility calculation failed: {e}")
+        print(f"Price volatility calculation failed: {e}")
         return 0.3  # Safe default
 
 
@@ -279,13 +279,13 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
         vol_profit_multiplier = 0.6  # Lower profit targets
         vol_position_multiplier = 0.4  # Much smaller positions
         vol_trail_multiplier = 3.5   # Much wider trailing stops
-        print(f"🔥 EXTREME VOLATILITY DETECTED: {price_volatility:.1%} - applying maximum risk protection")
+        print(f"EXTREME VOLATILITY DETECTED: {price_volatility:.1%} - applying maximum risk protection")
     elif price_volatility > 1.0:  # High volatility (>100%)
         vol_stop_multiplier = 2.0    # Wider stops
         vol_profit_multiplier = 0.7  # Slightly lower profit targets
         vol_position_multiplier = 0.6  # Smaller positions
         vol_trail_multiplier = 2.5   # Wider trailing stops
-        print(f"⚠️  HIGH VOLATILITY DETECTED: {price_volatility:.1%} - applying enhanced risk protection")
+        print(f"HIGH VOLATILITY DETECTED: {price_volatility:.1%} - applying enhanced risk protection")
     elif price_volatility > 0.6:  # Moderate-high volatility (>60%)
         vol_stop_multiplier = 1.5    # Moderately wider stops
         vol_profit_multiplier = 0.85 # Slightly lower profit targets
@@ -308,7 +308,7 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
         
         # Only print once per function call
         if not hasattr(get_adaptive_risk_params, '_value_msg_shown'):
-            print(f"📊 VALUE STRATEGY OPTIMIZATIONS: Wider stops (+30%), longer holds (3x), larger positions (+20%)")
+            print(f"VALUE STRATEGY OPTIMIZATIONS: Wider stops (+30%), longer holds (3x), larger positions (+20%)")
             get_adaptive_risk_params._value_msg_shown = True
     else:
         # Momentum strategy uses standard multipliers
@@ -341,7 +341,7 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
         }
         
         if bull_market_duration > 20:
-            print(f"📈 BULL SCALING: {bull_market_duration} days → {duration_multiplier:.1f}x enhanced aggressiveness")
+            print(f"BULL SCALING: {bull_market_duration} days → {duration_multiplier:.1f}x enhanced aggressiveness")
             
     elif market_regime == "BULL":
         # Moderate bull market duration scaling
@@ -365,7 +365,7 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
         }
         
         if bull_market_duration > 30:
-            print(f"📈 BULL SCALING: {bull_market_duration} days → {duration_multiplier:.1f}x enhanced aggressiveness")
+            print(f"BULL SCALING: {bull_market_duration} days → {duration_multiplier:.1f}x enhanced aggressiveness")
             
     elif market_regime == "STRONG_BEAR":
         base_params = {
@@ -522,7 +522,7 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
         momentum_bias *= duration_scaling  # Stronger momentum bias
         
         if bull_market_duration > 30:
-            print(f"📈 THRESHOLD SCALING: {bull_market_duration} days → {duration_scaling:.1f}x threshold tightening")
+            print(f"THRESHOLD SCALING: {bull_market_duration} days → {duration_scaling:.1f}x threshold tightening")
     
     # VALUE STRATEGY ADJUSTMENTS: Wider thresholds for less frequent trading
     if strategy.lower() == "value":
@@ -532,7 +532,7 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
         
         # Only print once per function call
         if not hasattr(calculate_adaptive_thresholds, '_value_msg_shown'):
-            print(f"📊 VALUE THRESHOLD ADJUSTMENT: Making thresholds 50% wider for less frequent trading")
+            print(f"VALUE THRESHOLD ADJUSTMENT: Making thresholds 50% wider for less frequent trading")
             calculate_adaptive_thresholds._value_msg_shown = True
     
     # VOLATILITY OVERRIDE: Detect extreme volatility scenarios
@@ -551,17 +551,17 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
             if market_regime == "STRONG_BULL":
                 # Strong bull markets get more volatility tolerance
                 volatility_override_strength = 0.5  # Reduce override by 50%
-                print(f"🚀 BULL VOLATILITY TOLERANCE: Reducing volatility override by 50% for {market_regime} (σ={std_score:.3f})")
+                print(f"BULL VOLATILITY TOLERANCE: Reducing volatility override by 50% for {market_regime} (σ={std_score:.3f})")
             else:  # BULL
                 # Regular bull markets get some volatility tolerance  
                 volatility_override_strength = 0.7  # Reduce override by 30%
-                print(f"🚀 BULL VOLATILITY TOLERANCE: Reducing volatility override by 30% for {market_regime} (σ={std_score:.3f})")
+                print(f"BULL VOLATILITY TOLERANCE: Reducing volatility override by 30% for {market_regime} (σ={std_score:.3f})")
             
             tightness = max(tightness, 1.8 * volatility_override_strength)  # Reduced override
             momentum_bias = min(momentum_bias, 0.1 + (0.2 * (1 - volatility_override_strength)))  # Less bias reduction
         else:
             # Non-bull markets get full volatility override
-            print(f"⚠️  VOLATILITY OVERRIDE: Extreme volatility detected (σ={std_score:.3f}), applying conservative thresholds despite {market_regime} regime")
+            print(f"VOLATILITY OVERRIDE: Extreme volatility detected (σ={std_score:.3f}), applying conservative thresholds despite {market_regime} regime")
             tightness = max(tightness, 1.8)  # Force wider thresholds
             momentum_bias = min(momentum_bias, 0.1)  # Reduce momentum bias
         
@@ -601,7 +601,7 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
                     buy_threshold = max(4.90, min(buy_threshold, 5.3))   # More aggressive
                     sell_threshold = max(4.2, min(sell_threshold, 4.85))  # More aggressive
             
-            print(f"🚀 BULL VOLATILITY BOUNDS: Using aggressive thresholds despite volatility for {market_regime} market")
+            print(f"BULL VOLATILITY BOUNDS: Using aggressive thresholds despite volatility for {market_regime} market")
         else:
             # Use conservative bounds for non-bull markets with extreme volatility
             buy_threshold = max(5.05, min(buy_threshold, 6.0))   # Conservative bounds for extreme volatility
@@ -686,10 +686,10 @@ def calculate_conviction_score(final_buy_score: float, score_history: List[float
                     volatility_penalty_reduction = 0.5  # Reduce penalty by 50%
                 
                 volatility_penalty = min(score_volatility * 0.5, 0.4) * volatility_penalty_reduction  # Reduced penalty
-                print(f"🚀 BULL VOLATILITY TOLERANCE: Reducing conviction penalty by {(1-volatility_penalty_reduction)*100:.0f}% for {market_regime} (σ={score_volatility:.3f})")
+                print(f"BULL VOLATILITY TOLERANCE: Reducing conviction penalty by {(1-volatility_penalty_reduction)*100:.0f}% for {market_regime} (σ={score_volatility:.3f})")
             else:
                 volatility_penalty = min(score_volatility * 0.5, 0.4)  # Full penalty for non-bull markets
-                print(f"⚠️  VOLATILITY PROTECTION: High score volatility (σ={score_volatility:.3f}), reducing position size")
+                print(f"VOLATILITY PROTECTION: High score volatility (σ={score_volatility:.3f}), reducing position size")
             
             conviction_boost -= volatility_penalty
     
@@ -705,7 +705,7 @@ def calculate_conviction_score(final_buy_score: float, score_history: List[float
             longer_volatility = np.std(score_history[-10:])
             if longer_volatility > 0.25:  # High volatility over longer period
                 regime_bonus *= 0.5  # Reduce bull market bonus
-                print(f"⚠️  VOLATILITY OVERRIDE: Reducing bull market conviction due to high volatility (σ={longer_volatility:.3f})")
+                print(f"VOLATILITY OVERRIDE: Reducing bull market conviction due to high volatility (σ={longer_volatility:.3f})")
         
         conviction_boost += regime_bonus
     elif market_regime in ["STRONG_BEAR"]:
@@ -822,7 +822,7 @@ def detect_momentum_reversal(price_data: pd.DataFrame, score_history: List[float
             }
             
     except Exception as e:
-        print(f"⚠️  Momentum reversal detection failed: {e}")
+        print(f"Momentum reversal detection failed: {e}")
         return {'reversal_detected': False, 'type': None, 'strength': 0.0}
 
 
@@ -901,10 +901,10 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         if recent_score_trend > 0.15 and final_buy_score > 5.1:
             if market_regime == "SIDEWAYS":
                 effective_market_regime = "BULL"
-                print(f"🚀 MOMENTUM OVERRIDE: Upgrading {market_regime} → {effective_market_regime} (trend: +{recent_score_trend:.2f})")
+                print(f"MOMENTUM OVERRIDE: Upgrading {market_regime} → {effective_market_regime} (trend: +{recent_score_trend:.2f})")
             elif market_regime == "BULL":
                 effective_market_regime = "STRONG_BULL"
-                print(f"🚀 MOMENTUM OVERRIDE: Upgrading {market_regime} → {effective_market_regime} (trend: +{recent_score_trend:.2f})")
+                print(f"MOMENTUM OVERRIDE: Upgrading {market_regime} → {effective_market_regime} (trend: +{recent_score_trend:.2f})")
     
     # Calculate adaptive thresholds with effective regime and strategy
     buy_threshold, sell_threshold = calculate_adaptive_thresholds(score_history, effective_market_regime, strategy=strategy)
@@ -967,13 +967,13 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
             # Make buying more aggressive during bullish reversals
             threshold_adjustment = 1.0 - (strength * 0.1)  # Up to 10% more aggressive
             effective_buy_threshold *= threshold_adjustment
-            print(f"🎯 REVERSAL ADJUSTMENT: Making buy threshold {(1-threshold_adjustment)*100:.1f}% more aggressive due to {reversal_type}")
+            print(f"REVERSAL ADJUSTMENT: Making buy threshold {(1-threshold_adjustment)*100:.1f}% more aggressive due to {reversal_type}")
             
         elif 'BEARISH' in reversal_type:
             # Make selling more aggressive during bearish reversals
             threshold_adjustment = 1.0 + (strength * 0.1)  # Up to 10% more likely to sell
             effective_sell_threshold *= threshold_adjustment
-            print(f"🎯 REVERSAL ADJUSTMENT: Making sell threshold {(threshold_adjustment-1)*100:.1f}% more aggressive due to {reversal_type}")
+            print(f"REVERSAL ADJUSTMENT: Making sell threshold {(threshold_adjustment-1)*100:.1f}% more aggressive due to {reversal_type}")
     
     # Determine recommendation with ULTRA-AGGRESSIVE logic and conviction scoring
     if final_buy_score >= effective_buy_threshold:

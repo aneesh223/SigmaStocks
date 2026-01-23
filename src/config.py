@@ -10,4 +10,4 @@ API_SECRET = os.getenv("ALPACA_SECRET_KEY")
 
 # Validation check
 if not API_KEY or not API_SECRET:
-    raise ValueError("❌ Missing Alpaca API keys! Please check your .env file.")
+    raise ValueError("Missing Alpaca API keys! Please check your .env file.")

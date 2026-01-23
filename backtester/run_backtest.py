@@ -54,7 +54,7 @@ def main():
     """Command-line backtesting interface"""
     
     if len(sys.argv) < 4:
-        print("❌ Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--no-plot] [--save]")
+        print("Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--no-plot] [--save]")
         print("\nExamples:")
         print("  python run_backtest.py TSLA m 30")
         print("  python run_backtest.py AAPL v 90")
@@ -76,14 +76,14 @@ def main():
     elif strategy_arg in ['v', 'value']:
         strategy = 'value'
     else:
-        print("❌ Strategy must be 'm'/'momentum' or 'v'/'value'")
+        print("Strategy must be 'm'/'momentum' or 'v'/'value'")
         return 1
     
     # Parse period (might consume 1 or 2 arguments)
     try:
         start_date, end_date, args_consumed = parse_period(sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
     except (ValueError, IndexError) as e:
-        print(f"❌ Period error: {e}")
+        print(f"Period error: {e}")
         return 1
     
     # Parse remaining arguments
@@ -104,8 +104,8 @@ def main():
     save_results = '--save' in remaining_args[cash_idx:]
     
     # Display configuration
-    print(f"🚀 Orthrus Backtest")
-    print(f"📊 {ticker} | {strategy.upper()} | {start_date.date()} to {end_date.date()} | ${initial_cash:,.0f}")
+    print(f"Orthrus Backtest")
+    print(f"{ticker} | {strategy.upper()} | {start_date.date()} to {end_date.date()} | ${initial_cash:,.0f}")
     
     try:
         # Run backtest
@@ -137,12 +137,12 @@ def main():
             with open(filename, 'w') as f:
                 json.dump(results_copy, f, indent=2, default=str)
             
-            print(f"💾 Results saved to: {filename}")
+            print(f"Results saved to: {filename}")
         
         return 0
         
     except Exception as e:
-        print(f"❌ Backtesting failed: {e}")
+        print(f"Backtesting failed: {e}")
         return 1
 
 if __name__ == "__main__":

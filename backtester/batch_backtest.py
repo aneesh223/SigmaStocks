@@ -14,9 +14,9 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
     cmd = ['python3', 'backtester/run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
     
     print(f"\n{'='*80}")
-    print(f"🧪 TEST: {ticker} {strategy.upper()} | {start_date} to {end_date}")
+    print(f"TEST: {ticker} {strategy.upper()} | {start_date} to {end_date}")
     if description:
-        print(f"📝 {description}")
+        print(f"{description}")
     print('='*80)
     
     try:
@@ -32,11 +32,11 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
             regime = None
             
             for line in lines:
-                if "📈 Strategy Return:" in line:
+                if "Strategy Return:" in line:
                     strategy_return = line.split(":")[1].strip()
-                elif "📊 Buy & Hold Return:" in line:
+                elif "Buy & Hold Return:" in line:
                     buy_hold_return = line.split(":")[1].strip()
-                elif "🎯 Alpha (Outperformance):" in line:
+                elif "Alpha (Outperformance):" in line:
                     alpha = line.split(":")[1].strip()
                 elif "🔄 Number of Trades:" in line:
                     trades = line.split(":")[1].strip()
@@ -56,17 +56,17 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
                 'description': description
             }
         else:
-            print(f"❌ FAILED: {result.stderr}")
+            print(f"FAILED: {result.stderr}")
             return {'success': False, 'ticker': ticker, 'strategy': strategy.upper(), 'error': result.stderr}
             
     except Exception as e:
-        print(f"❌ ERROR: {e}")
+        print(f"ERROR: {e}")
         return {'success': False, 'ticker': ticker, 'strategy': strategy.upper(), 'error': str(e)}
 
 def main():
     """Run comprehensive tests"""
     
-    print("🚀 CHIMERA COMPREHENSIVE ALGORITHM TESTING")
+    print("CHIMERA COMPREHENSIVE ALGORITHM TESTING")
     print("Testing across multiple time periods, market conditions, and sectors")
     print("=" * 80)
     
@@ -116,9 +116,9 @@ def main():
     
     # Print comprehensive summary
     print(f"\n{'='*80}")
-    print(f"📊 COMPREHENSIVE TEST RESULTS")
+    print(f"COMPREHENSIVE TEST RESULTS")
     print(f"{'='*80}")
-    print(f"✅ Successful Tests: {successful}/{len(test_configs)}")
+    print(f"Successful Tests: {successful}/{len(test_configs)}")
     print()
     
     # Group results by category
@@ -140,10 +140,10 @@ def main():
     
     # Print category summaries
     categories = [
-        ("🚀 BULL MARKET PERFORMANCE", bull_markets),
-        ("💎 VALUE STRATEGY PERFORMANCE", value_strategies), 
-        ("🏭 SECTOR DIVERSIFICATION", sectors),
-        ("⚡ VOLATILITY & MIXED CONDITIONS", volatility_tests)
+        ("BULL MARKET PERFORMANCE", bull_markets),
+        ("VALUE STRATEGY PERFORMANCE", value_strategies), 
+        ("SECTOR DIVERSIFICATION", sectors),
+        ("VOLATILITY & MIXED CONDITIONS", volatility_tests)
     ]
     
     for category_name, category_results in categories:
@@ -153,8 +153,8 @@ def main():
             for result in category_results:
                 alpha_color = "🟢" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) > 0 else "🔴" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) < -5 else "🟡"
                 print(f"{alpha_color} {result['ticker']} {result['strategy']}: {result['alpha']} alpha | {result['trades']} trades | {result['regime']}")
-                print(f"   📈 Strategy: {result['strategy_return']} vs Buy-Hold: {result['buy_hold_return']}")
-                print(f"   📝 {result['description']}")
+                print(f"   Strategy: {result['strategy_return']} vs Buy-Hold: {result['buy_hold_return']}")
+                print(f"   {result['description']}")
                 print()
     
     # Calculate overall statistics
@@ -174,7 +174,7 @@ def main():
             positive_alpha_count = sum(1 for a in alphas if a > 0)
             near_zero_count = sum(1 for a in alphas if -2 <= a <= 2)  # Within 2% of buy-hold
             
-            print(f"\n📈 OVERALL STATISTICS")
+            print(f"\nOVERALL STATISTICS")
             print("-" * 40)
             print(f"Average Alpha: {avg_alpha:+.2f}%")
             print(f"Positive Alpha: {positive_alpha_count}/{len(alphas)} ({positive_alpha_count/len(alphas)*100:.1f}%)")

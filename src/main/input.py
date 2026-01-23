@@ -58,7 +58,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
     # Optimized date filtering with trading day awareness
     today = get_last_trading_day()  # Use last trading day instead of raw datetime.now()
     if today.date() != datetime.now().date():
-        print(f"📅 Note: Using last trading day ({today.strftime('%A, %B %d')}) - Markets closed on weekends")
+        print(f"Note: Using last trading day ({today.strftime('%A, %B %d')}) - Markets closed on weekends")
         
     if lookback_days <= 1:
         cutoff_date = today.date()
@@ -115,11 +115,11 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
 
 def main():
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("   📈 ORTHRUS: AI SENTIMENT ANALYZER")
+    print("   ORTHRUS: AI SENTIMENT ANALYZER")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     while True:
-        ticker = input("\n🎯 Enter ticker (or 'exit'): ").upper().strip()
+        ticker = input("\nEnter ticker (or 'exit'): ").upper().strip()
         
         if ticker in ['EXIT', 'QUIT', 'Q']: 
             break

@@ -88,9 +88,9 @@ class AlpacaBacktester:
                 api_key=config.API_KEY,
                 secret_key=config.API_SECRET
             )
-            print("✅ Alpaca client initialized successfully")
+            print("Alpaca client initialized successfully")
         except Exception as e:
-            print(f"❌ Error initializing Alpaca client: {e}")
+            print(f"Error initializing Alpaca client: {e}")
             raise
     
     def fetch_historical_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -105,7 +105,7 @@ class AlpacaBacktester:
             DataFrame with OHLCV data
         """
         try:
-            print(f"📊 Fetching historical data for {self.ticker} from {start_date.date()} to {end_date.date()}...")
+            print(f"Fetching historical data for {self.ticker} from {start_date.date()} to {end_date.date()}...")
             
             # Create request for daily bars
             request_params = StockBarsRequest(
@@ -144,14 +144,14 @@ class AlpacaBacktester:
                 elif price_data.index.tz != pytz.UTC:
                     price_data.index = price_data.index.tz_convert('UTC')
                 
-                print(f"✅ Fetched {len(price_data)} days of price data")
+                print(f"Fetched {len(price_data)} days of price data")
                 return price_data
             else:
-                print(f"❌ No price data found for {self.ticker}")
+                print(f"No price data found for {self.ticker}")
                 return pd.DataFrame()
                 
         except Exception as e:
-            print(f"❌ Error fetching historical data: {e}")
+            print(f"Error fetching historical data: {e}")
             return pd.DataFrame()
     
     def fetch_news_data(self, days: int = 90, end_date: datetime = None) -> List[Tuple]:
@@ -166,18 +166,18 @@ class AlpacaBacktester:
             List of news tuples (timestamp, headline, source)
         """
         try:
-            print(f"📰 Fetching {days} days of news data for {self.ticker}...")
+            print(f"Fetching {days} days of news data for {self.ticker}...")
             if end_date:
                 print(f"   Historical news ending at: {end_date.date()}")
             
             # Use the existing scraper to get news data with historical support
             profile_data, news_data = scraper.scrape_hybrid(self.ticker, days=days, end_date=end_date)
             
-            print(f"✅ Fetched {len(news_data)} news articles")
+            print(f"Fetched {len(news_data)} news articles")
             return news_data
             
         except Exception as e:
-            print(f"❌ Error fetching news data: {e}")
+            print(f"Error fetching news data: {e}")
             return []
     
     def prepare_simulation_data(self, start_date: datetime, end_date: datetime, news_days: int = 90):
@@ -205,7 +205,7 @@ class AlpacaBacktester:
         if self.full_price_data.empty:
             raise ValueError(f"No price data available for {self.ticker}")
         
-        print(f"📋 Simulation data prepared:")
+        print(f"Simulation data prepared:")
         print(f"   Price data: {len(self.full_price_data)} records")
         print(f"   News data: {len(self.full_news_data)} articles")
     
@@ -266,7 +266,7 @@ class AlpacaBacktester:
         if action == "BUY" and self.cash > 0:
             # Buy as many shares as possible
             if price <= 0:
-                print(f"⚠️  Warning: Invalid price {price} for BUY order, skipping...")
+                print(f"Warning: Invalid price {price} for BUY order, skipping...")
                 return
                 
             shares_to_buy = int(self.cash / price)
@@ -475,7 +475,7 @@ class AlpacaBacktester:
         """
         # Check overtrading protection
         if action == "BUY" and self.check_overtrading_protection(date, market_regime):
-            print(f"🛡️  OVERTRADING PROTECTION: Blocking BUY signal (Score: {buy_score:.1f}) - too many recent trades")
+            print(f"OVERTRADING PROTECTION: Blocking BUY signal (Score: {buy_score:.1f}) - too many recent trades")
             return
         
         # Check buy-and-hold mode
@@ -490,7 +490,7 @@ class AlpacaBacktester:
             
             # Validate price
             if price <= 0:
-                print(f"⚠️  Warning: Invalid price {price} for BUY order, skipping...")
+                print(f"Warning: Invalid price {price} for BUY order, skipping...")
                 return
             
             # Calculate conviction score for dynamic position sizing
@@ -585,10 +585,10 @@ class AlpacaBacktester:
         Returns:
             Dictionary with simulation results
         """
-        print(f"\n🚀 Starting backtest simulation for {self.ticker}")
-        print(f"📅 Period: {start_date.date()} to {end_date.date()}")
-        print(f"💰 Initial cash: ${self.initial_cash:,.2f}")
-        print(f"📈 Strategy: {self.strategy.upper()}")
+        print(f"\nStarting backtest simulation for {self.ticker}")
+        print(f"Period: {start_date.date()} to {end_date.date()}")
+        print(f"Initial cash: ${self.initial_cash:,.2f}")
+        print(f"Strategy: {self.strategy.upper()}")
         print("=" * 60)
         
         # Ensure start_date and end_date are timezone-aware (UTC)
@@ -615,20 +615,20 @@ class AlpacaBacktester:
         if len(trading_days) == 0:
             raise ValueError("No trading days found in the specified period")
         
-        print(f"📊 Simulating {len(trading_days)} trading days...")
+        print(f"Simulating {len(trading_days)} trading days...")
         
         # OPTIMIZATION: Analyze ALL news articles ONCE and calculate ALL scores ONCE
         print(f"🧠 Analyzing all {len(self.full_news_data)} news articles (one-time processing)...")
         try:
             # Analyze all news at once to get complete sentiment DataFrame
             full_sentiment_df = analyzer.get_sentiment(self.full_news_data, self.ticker, lookback_days)
-            print(f"✅ Sentiment analysis complete: {len(full_sentiment_df)} sentiment records")
+            print(f"Sentiment analysis complete: {len(full_sentiment_df)} sentiment records")
         except Exception as e:
-            print(f"❌ Error in sentiment analysis: {e}")
+            print(f"Error in sentiment analysis: {e}")
             full_sentiment_df = pd.DataFrame()
         
         if full_sentiment_df.empty:
-            print("⚠️  No sentiment data available, using neutral scores")
+            print("No sentiment data available, using neutral scores")
             # Create a simple lookup with neutral scores for all trading days
             score_lookup = {date: 5.0 for date in trading_days}
         else:
@@ -657,17 +657,17 @@ class AlpacaBacktester:
                     date_key = timestamp
                 score_lookup[date_key] = score
             
-            print(f"✅ Pre-calculated {len(score_lookup)} Final_Buy_Scores")
+            print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
         
         print()
         
         # INITIAL MARKET REGIME DETECTION for adaptive strategy
         initial_market_regime = self.detect_market_regime(self.full_price_data)
         current_market_regime = initial_market_regime
-        print(f"🎯 Initial Market Regime: {initial_market_regime}")
+        print(f"Initial Market Regime: {initial_market_regime}")
         
         risk_params = self.get_adaptive_risk_params(initial_market_regime)
-        print(f"📊 Initial Adaptive Parameters: Stop-loss: {risk_params['stop_loss_pct']*100:.0f}%, Take-profit: {risk_params['take_profit_pct']*100:.0f}%, Position size: {risk_params['position_size_multiplier']:.1f}x")
+        print(f"Initial Adaptive Parameters: Stop-loss: {risk_params['stop_loss_pct']*100:.0f}%, Take-profit: {risk_params['take_profit_pct']*100:.0f}%, Position size: {risk_params['position_size_multiplier']:.1f}x")
         print()
         
         # Simulation loop - now extremely fast since everything is pre-calculated
@@ -680,11 +680,11 @@ class AlpacaBacktester:
                 try:
                     current_price = self.full_price_data.loc[simulation_date, 'Close']
                 except (KeyError, IndexError):
-                    print(f"⚠️  Warning: No price data for {simulation_date.date()}, skipping...")
+                    print(f"Warning: No price data for {simulation_date.date()}, skipping...")
                     continue
                 
                 if current_price <= 0:
-                    print(f"⚠️  Warning: Invalid price {current_price} for {simulation_date.date()}, skipping...")
+                    print(f"Warning: Invalid price {current_price} for {simulation_date.date()}, skipping...")
                     continue
                 
                 # FAST LOOKUP: Get pre-calculated Final_Buy_Score for this date
@@ -723,7 +723,7 @@ class AlpacaBacktester:
                         else:
                             reversal_info = {'reversal_detected': False}
                     except Exception as e:
-                        print(f"⚠️  Warning: Momentum reversal detection failed: {e}")
+                        print(f"Warning: Momentum reversal detection failed: {e}")
                         reversal_info = {'reversal_detected': False}
                     
                     if reversal_info['reversal_detected'] and reversal_info['strength'] > 0.7:
@@ -739,11 +739,11 @@ class AlpacaBacktester:
                                 else:
                                     current_market_regime = "BULL"
                                 regime_update_counter += 1
-                                print(f"🔄 DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (reversal: {reversal_type}, strength: {strength:.1f})")
+                                print(f"DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (reversal: {reversal_type}, strength: {strength:.1f})")
                             elif current_market_regime == "BULL" and 'ACCELERATION' in reversal_type:
                                 current_market_regime = "STRONG_BULL"
                                 regime_update_counter += 1
-                                print(f"🔄 DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (acceleration detected)")
+                                print(f"DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (acceleration detected)")
                                 
                         elif 'BEARISH' in reversal_type:
                             if current_market_regime in ["BULL", "STRONG_BULL", "SIDEWAYS"]:
@@ -752,11 +752,11 @@ class AlpacaBacktester:
                                 else:
                                     current_market_regime = "BEAR"
                                 regime_update_counter += 1
-                                print(f"🔄 DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (reversal: {reversal_type}, strength: {strength:.1f})")
+                                print(f"DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (reversal: {reversal_type}, strength: {strength:.1f})")
                             elif current_market_regime == "BEAR" and 'ACCELERATION' in reversal_type:
                                 current_market_regime = "STRONG_BEAR"
                                 regime_update_counter += 1
-                                print(f"🔄 DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (acceleration detected)")
+                                print(f"DYNAMIC REGIME UPDATE #{regime_update_counter}: {old_regime} → {current_market_regime} (acceleration detected)")
                 
                 # BULL MARKET DURATION TRACKING: Update bull market duration for adaptive scaling
                 if current_market_regime in ["BULL", "STRONG_BULL"]:
@@ -776,14 +776,14 @@ class AlpacaBacktester:
                 should_sell_risk, risk_reason = self.check_adaptive_risk_management(current_price, portfolio_value, current_market_regime)
                 if should_sell_risk:
                     self.execute_adaptive_trade("SELL", current_price, simulation_date, buy_score_t, current_market_regime)
-                    print(f"🛡️  {risk_reason}")
+                    print(f"{risk_reason}")
                 else:
                     # ADAPTIVE THRESHOLDS: Calculate regime-aware buy/sell thresholds
                     buy_threshold, sell_threshold = self.calculate_adaptive_thresholds(score_history, current_market_regime)
                     
                     # Debug: Print adaptive thresholds for first few days
                     if i < 3:
-                        print(f"📊 Day {i+1}: Final_Buy_Score = {buy_score_t:.2f} | {current_market_regime} Thresholds: Buy≥{buy_threshold:.3f}, Sell≤{sell_threshold:.3f}")
+                        print(f"Day {i+1}: Final_Buy_Score = {buy_score_t:.2f} | {current_market_regime} Thresholds: Buy≥{buy_threshold:.3f}, Sell≤{sell_threshold:.3f}")
                     
                     # Trading logic using adaptive thresholds with minimum holding period
                     if buy_score_t >= buy_threshold and self.shares == 0:
@@ -813,10 +813,10 @@ class AlpacaBacktester:
                 # Progress update every 10 days with buy score info and adaptive thresholds
                 if (i + 1) % 10 == 0:
                     buy_thresh, sell_thresh = self.calculate_adaptive_thresholds(score_history, current_market_regime)
-                    print(f"📈 Day {i+1}/{len(trading_days)}: ${portfolio_value:,.2f} (Score: {buy_score_t:.1f}, {current_market_regime}) | Thresholds: {buy_thresh:.3f}/{sell_thresh:.3f}")
+                    print(f"Day {i+1}/{len(trading_days)}: ${portfolio_value:,.2f} (Score: {buy_score_t:.1f}, {current_market_regime}) | Thresholds: {buy_thresh:.3f}/{sell_thresh:.3f}")
             
             except Exception as e:
-                print(f"⚠️  Error on {simulation_date.date()}: {e}")
+                print(f"Error on {simulation_date.date()}: {e}")
                 continue
         
         # Final portfolio value
@@ -839,11 +839,11 @@ class AlpacaBacktester:
                     buy_hold_value = buy_hold_shares * final_price
                     buy_hold_return = ((buy_hold_value - self.initial_cash) / self.initial_cash) * 100
                     
-                    print(f"📊 Buy-and-Hold: Started on {trading_days[0].date()} at ${initial_price:.2f} (Day 1 - fair comparison)")
+                    print(f"Buy-and-Hold: Started on {trading_days[0].date()} at ${initial_price:.2f} (Day 1 - fair comparison)")
                 else:
                     buy_hold_return = 0
             except (KeyError, IndexError):
-                print("⚠️  Warning: Could not calculate buy-and-hold return due to missing price data")
+                print("Warning: Could not calculate buy-and-hold return due to missing price data")
                 buy_hold_return = 0
         else:
             buy_hold_return = 0
@@ -874,7 +874,7 @@ class AlpacaBacktester:
     def print_results(self, results: Dict):
         """Print backtesting results summary with momentum reversal information"""
         print("\n" + "=" * 60)
-        print("📊 BACKTESTING RESULTS")
+        print("BACKTESTING RESULTS")
         print("=" * 60)
         print(f"Ticker: {results['ticker']}")
         print(f"Strategy: {results['strategy'].upper()}")
@@ -884,28 +884,28 @@ class AlpacaBacktester:
         print(f"Final Cash: ${results['final_cash']:,.2f}")
         print(f"Final Shares: {results['final_shares']}")
         print()
-        print(f"📈 Strategy Return: {results['total_return_pct']:+.2f}%")
-        print(f"📊 Buy & Hold Return: {results['buy_hold_return_pct']:+.2f}%")
-        print(f"🎯 Alpha (Outperformance): {results['alpha']:+.2f}%")
-        print(f"🔄 Number of Trades: {results['num_trades']}")
+        print(f"Strategy Return: {results['total_return_pct']:+.2f}%")
+        print(f"Buy & Hold Return: {results['buy_hold_return_pct']:+.2f}%")
+        print(f"Alpha (Outperformance): {results['alpha']:+.2f}%")
+        print(f"Number of Trades: {results['num_trades']}")
         
         # Market regime information
         initial_regime = results.get('initial_regime', 'N/A')
         final_regime = results.get('final_regime', 'N/A')
         regime_updates = results.get('regime_updates', 0)
         print()
-        print(f"🎯 Market Regime Analysis:")
+        print(f"Market Regime Analysis:")
         print(f"   Initial Regime: {initial_regime}")
         print(f"   Final Regime: {final_regime}")
         print(f"   Dynamic Updates: {regime_updates}")
         if regime_updates > 0:
-            print(f"   ✅ Momentum reversal detection successfully adapted to {regime_updates} regime changes")
+            print(f"   Momentum reversal detection successfully adapted to {regime_updates} regime changes")
         
         # Add buy score statistics
         if results['portfolio_history']:
             buy_scores = [h['Final_Buy_Score'] for h in results['portfolio_history']]
             print()
-            print(f"📊 Buy Score Stats:")
+            print(f"Buy Score Stats:")
             print(f"   Max: {max(buy_scores):.2f}")
             print(f"   Min: {min(buy_scores):.2f}")
             print(f"   Avg: {sum(buy_scores)/len(buy_scores):.2f}")
@@ -915,7 +915,7 @@ class AlpacaBacktester:
         print()
         
         if results['trade_log']:
-            print("📋 TRADE LOG:")
+            print("TRADE LOG:")
             for trade in results['trade_log']:
                 action_emoji = "🟢" if trade['Action'] == 'BUY' else "🔴"
                 regime = trade.get('Market_Regime', 'N/A')
@@ -1015,7 +1015,7 @@ class AlpacaBacktester:
             print("Plot generated but display failed (possibly headless environment)")
         
         # Print summary statistics
-        print(f"\n📊 Performance Summary:")
+        print(f"\nPerformance Summary:")
         print(f"Max Portfolio Value: ${df['Portfolio_Value'].max():,.2f}")
         print(f"Min Portfolio Value: ${df['Portfolio_Value'].min():,.2f}")
         print(f"Volatility (Portfolio): {df['Portfolio_Value'].pct_change().std() * 100:.2f}%")
@@ -1047,7 +1047,7 @@ def run_backtest_example():
         return results
         
     except Exception as e:
-        print(f"❌ Backtesting failed: {e}")
+        print(f"Backtesting failed: {e}")
         return None
 
 

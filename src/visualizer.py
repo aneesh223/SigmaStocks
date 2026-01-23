@@ -160,7 +160,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     # Display simplified data summary
     if hasattr(merged_df, 'attrs') and 'data_info' in merged_df.attrs:
         data_info = merged_df.attrs['data_info']
-        print(f"\n📊 Analysis Complete")
+        print(f"\nAnalysis Complete")
         print(f"Market data: {data_info['price_records']} records")
         print(f"News data: {data_info['sentiment_records']} articles analyzed")
         print(f"Time periods: {data_info['merged_records']} data points")

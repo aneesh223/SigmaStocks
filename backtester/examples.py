@@ -7,7 +7,7 @@ Quick reference for common backtesting commands
 def show_examples():
     """Display example commands"""
     
-    print("🚀 Chimera Backtesting Examples")
+    print("Chimera Backtesting Examples")
     print("=" * 50)
     
     examples = [
@@ -49,7 +49,7 @@ def show_examples():
         print(f"   Description: {example['description']}")
     
     print(f"\n{'='*50}")
-    print("📋 Parameter Reference:")
+    print("Parameter Reference:")
     print("  <ticker>    : Stock symbol (TSLA, AAPL, NVDA, etc.)")
     print("  <strategy>  : m/momentum or v/value")
     print("  <period>    : Days (30, 90, 180) OR date range (2023-01-20 2023-07-20)")
@@ -57,7 +57,7 @@ def show_examples():
     print("  --plot      : Show performance charts")
     print("  --save      : Save results to JSON file")
     
-    print(f"\n🎯 Pro Tips:")
+    print(f"\nPro Tips:")
     print("  • Use historical dates (15+ days old) to avoid API limits")
     print("  • Momentum works best with 30-90 day periods")
     print("  • Value works best with 90-180 day periods")

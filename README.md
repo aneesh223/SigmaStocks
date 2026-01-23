@@ -196,19 +196,37 @@ The revolutionary hybrid approach combines two complementary AI models:
 3. **Perfect for**: Automation, scripting, server environments, or when you don't want GUI popups
 
 ### Historical Backtesting
-1. **Single Backtest**: `python backtester/run_backtest.py TSLA m 30`
-   - Format: `<ticker> <strategy> <period> [cash] [--plot] [--save]`
-   - Strategy: `v` (VALUE) or `m` (MOMENTUM)
-   - Period: Number of days to backtest
 
-2. **Comprehensive Testing**: `python backtester/batch_backtest.py`
-   - Tests multiple scenarios across different market conditions
-   - Bull markets, value strategies, cross-sector performance, volatility conditions
-   - Generates detailed performance analysis with categorized results
-   - Statistical analysis and comprehensive reporting
+#### Quick Start
+```bash
+# Basic backtest
+python backtester/run_backtest.py TSLA m 30
 
-3. **Examples**: `python backtester/examples.py`
-   - Shows usage examples and parameter explanations
+# With custom capital and visualization
+python backtester/run_backtest.py AAPL v 180 25000 --plot --save
+```
+
+#### Command Structure
+```bash
+python backtester/run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
+```
+
+**Parameters:**
+- **ticker**: Stock symbol (TSLA, AAPL, NVDA, MSFT, etc.)
+- **strategy**: `v` (VALUE) or `m` (MOMENTUM)
+- **period**: Days (30, 90, 180) OR date range (2023-01-20 2023-07-20)
+- **cash**: Starting capital (default: $10,000)
+- **--plot**: Show performance charts
+- **--save**: Save results to JSON file
+
+#### Advanced Testing
+```bash
+# Comprehensive multi-scenario testing
+python backtester/batch_backtest.py
+
+# View all examples and tips
+python backtester/examples.py
+```
 
 ### Strategy-Specific Timeframes
 - **VALUE Strategy**: 1M, 6M, YTD, MAX (long-term analysis)
@@ -259,20 +277,52 @@ The revolutionary hybrid approach combines two complementary AI models:
   - Performance analysis with detailed categorized results
   - Visual performance charts and P&L tracking
 
-### CLI Usage Examples
+### Quick Reference
+
+#### Basic Command Structure
 ```bash
-# Basic backtest: TSLA momentum strategy, 30 days
+python backtester/run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
+```
+
+#### Parameters
+- **ticker**: Stock symbol (TSLA, AAPL, NVDA, MSFT, etc.)
+- **strategy**: `m` (momentum) or `v` (value)
+- **period**: Days (30, 90, 180) OR date range (2023-01-20 2023-07-20)
+- **cash**: Starting capital (default: $10,000)
+- **--plot**: Show performance charts
+- **--save**: Save results to JSON file
+
+#### Usage Examples
+```bash
+# Basic momentum test (30 days)
 python backtester/run_backtest.py TSLA m 30
 
-# Advanced backtest: AAPL value strategy, 180 days, $50k capital, save results
-python backtester/run_backtest.py AAPL v 180 50000 --save
+# Value strategy with custom capital
+python backtester/run_backtest.py AAPL v 180 25000
+
+# Historical date range with charts and save
+python backtester/run_backtest.py NVDA m 2023-01-20 2023-07-20 --plot --save
+
+# High capital test with full analysis
+python backtester/run_backtest.py MSFT m 90 50000 --plot --save
+
+# Quick comparison (momentum vs value)
+python backtester/run_backtest.py AAPL m 30 && python backtester/run_backtest.py AAPL v 30
 
 # Comprehensive testing across multiple scenarios
 python backtester/batch_backtest.py
 
-# View usage examples
+# View all usage examples and tips
 python backtester/examples.py
 ```
+
+#### Pro Tips
+- **Historical Dates**: Use dates 15+ days old to avoid API rate limits
+- **Momentum Strategy**: Works best with 30-90 day periods for swing trading
+- **Value Strategy**: Optimal with 90-180 day periods for long-term analysis
+- **Validation**: Test multiple tickers to validate strategy robustness
+- **Market Conditions**: Test across different market regimes (bull/bear/sideways)
+- **Capital Testing**: Try different starting amounts to test scalability
 
 ### Performance Optimization
 - **Efficient Data Processing**: All sentiment analysis done once at startup
