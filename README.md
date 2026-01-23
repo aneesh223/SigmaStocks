@@ -1,37 +1,14 @@
 # SigmaStocks: AI-Powered Algorithmic Trading Engine
 
-**An advanced algorithmic trading platform that combines DistilRoBERTa transformer models with sophisticated technical analysis to generate data-driven investment insights. Features comprehensive backtesting, adaptive risk management, and proven bull market optimization achieving near-perfect performance (-0.49% average alpha).**
+**An advanced algorithmic trading platform that combines DistilRoBERTa transformer models with sophisticated technical analysis to generate data-driven investment insights. Features comprehensive backtesting, adaptive risk management, and market regime detection for systematic trading strategies.**
 
 ## 🎯 **What Makes SigmaStocks Special**
 
 - **🤖 Hybrid AI Sentiment Analysis**: Combines VADER + DistilRoBERTa for superior financial news interpretation
 - **📈 Adaptive Market Regime Detection**: Automatically adjusts strategy based on BULL/BEAR/SIDEWAYS market conditions  
-- **🎯 Proven Performance**: 100% test success rate across 17 market scenarios with excellent bull market participation
+- **🎯 Comprehensive Testing Framework**: Extensive backtesting across multiple market scenarios and timeframes
 - **🛡️ Advanced Risk Management**: Dynamic stop-loss, take-profit, and volatility protection systems
-- **⚡ Production-Ready**: Comprehensive backtesting system with fair buy-and-hold comparisons
-
-## 🏆 Performance Achievements
-
-### Bull Market Optimization Success
-Recent comprehensive testing across 17 different market scenarios shows outstanding performance:
-
-- **100% Test Success Rate**: All 17 test scenarios completed successfully
-- **Near-Perfect Bull Market Performance**: Average -0.49% alpha (within 1% of buy-and-hold)
-- **Excellent Risk Management**: Protected against major downturns while capturing upside
-- **Cross-Sector Validation**: Consistent performance across tech, finance, energy, and healthcare
-
-### Key Performance Metrics
-- **Average Alpha**: +0.36% across all test scenarios
-- **Positive Alpha Rate**: 41.2% of tests outperformed buy-and-hold
-- **Near Buy-Hold Performance**: 47.1% of tests within ±2% of buy-and-hold
-- **Bull Market Participation**: Perfect single-trade behavior in strong bull markets
-- **Volatility Handling**: Successfully managed 16.9%-81.9% volatility ranges
-
-### Algorithm Strengths
-- **Market Regime Adaptation**: Correctly identifies and adapts to all market conditions
-- **Volatility Tolerance**: Bull market volatility tolerance prevents premature exits
-- **Fair Comparison**: Buy-and-hold always starts Day 1 for truly fair performance measurement
-- **Production Ready**: Robust error handling and consistent performance across diverse conditions
+- **⚡ Production-Ready**: Professional-grade backtesting system with fair performance comparisons
 
 ## 🚀 Features
 
@@ -210,10 +187,10 @@ The revolutionary hybrid approach combines two complementary AI models:
    - Period: Number of days to backtest
 
 2. **Comprehensive Testing**: `python backtester/batch_backtest.py`
-   - Tests 17 different scenarios across multiple market conditions
+   - Tests multiple scenarios across different market conditions
    - Bull markets, value strategies, cross-sector performance, volatility conditions
    - Generates detailed performance analysis with categorized results
-   - Statistical analysis including average alpha and success rates
+   - Statistical analysis and comprehensive reporting
 
 3. **Examples**: `python backtester/examples.py`
    - Shows usage examples and parameter explanations
@@ -261,9 +238,9 @@ The revolutionary hybrid approach combines two complementary AI models:
   - Day-by-day simulation with no look-ahead bias
   - Pre-calculated B(t) and Final_Buy_Score for maximum efficiency
   - Advanced adaptive risk management with market regime detection
-  - Bull market volatility tolerance system for maximum participation
-  - Fair buy-and-hold comparison (always starts Day 1)
-  - Comprehensive testing across 17 different market scenarios
+  - Bull market volatility tolerance system for enhanced participation
+  - Fair buy-and-hold comparison methodology
+  - Comprehensive testing framework across multiple market scenarios
   - Performance analysis with detailed categorized results
   - Visual performance charts and P&L tracking
 
