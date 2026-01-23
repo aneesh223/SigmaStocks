@@ -14,7 +14,7 @@ matplotlib.use('Agg')
 
 # 2. MONKEY PATCH: Disable plt.show() completely
 # This prevents the "flash" by making show() do absolutely nothing.
-plt.show = lambda: None
+plt.show = lambda *args, **kwargs: None
 
 from datetime import datetime
 import pytz
