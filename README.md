@@ -187,7 +187,7 @@ The revolutionary hybrid approach combines two complementary AI models:
 1. **Command-line analysis**: `python src/main/headless.py <ticker> <strategy> <period> [--save]`
 2. **Examples**:
    ```bash
-   # Quick analysis without GUI
+   # Quick analysis without GUI (run from project root)
    python src/main/headless.py TSLA m 30
    
    # Save chart to file
