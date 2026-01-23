@@ -35,6 +35,7 @@
 
 ### Interactive Visualization
 - **Real-Time Charts**: Combined sentiment and price data visualization with trading signals
+- **Dual Interface**: Interactive mode (`input.py`) and headless CLI mode (`headless.py`)
 - **Signal Markers**: Visual buy/sell indicators on matplotlib charts
 - **Source Breakdown**: Article count by reliability tier
 - **Multiple Timeframes**: 1D, 5D, 1M, 6M analysis periods with strategy-specific restrictions
@@ -174,11 +175,25 @@ The revolutionary hybrid approach combines two complementary AI models:
 ## 🎯 Usage
 
 ### Real-Time Analysis
-1. Run the program: `python src/main.py`
+
+#### Interactive Mode (Recommended)
+1. Run the program: `python src/main/input.py`
 2. Enter a stock ticker (e.g., TSLA, AAPL, MSFT)
 3. **Select strategy first** (VALUE or MOMENTUM)
 4. Choose timeframe based on strategy restrictions
 5. View results and interactive charts with trading signals
+
+#### Headless Mode (CLI/Automation)
+1. **Command-line analysis**: `python src/main/headless.py <ticker> <strategy> <period> [--save]`
+2. **Examples**:
+   ```bash
+   # Quick analysis without GUI
+   python src/main/headless.py TSLA m 30
+   
+   # Save chart to file
+   python src/main/headless.py AAPL v 90 --save
+   ```
+3. **Perfect for**: Automation, scripting, server environments, or when you don't want GUI popups
 
 ### Historical Backtesting
 1. **Single Backtest**: `python backtester/run_backtest.py TSLA m 30`
