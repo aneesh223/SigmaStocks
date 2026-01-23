@@ -1,6 +1,11 @@
 # Memory-optimized imports
 from datetime import datetime, timedelta
 import pytz
+import sys
+import os
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+
 import scraper
 import analyzer
 import market
