@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SigmaStocks Quick Backtesting CLI
+Orthrus Quick Backtesting CLI
 Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
 
 Examples:
@@ -104,7 +104,7 @@ def main():
     save_results = '--save' in remaining_args[cash_idx:]
     
     # Display configuration
-    print(f"🚀 SigmaStocks Backtest")
+    print(f"🚀 Orthrus Backtest")
     print(f"📊 {ticker} | {strategy.upper()} | {start_date.date()} to {end_date.date()} | ${initial_cash:,.0f}")
     
     try:

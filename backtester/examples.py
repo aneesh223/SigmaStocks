@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-SigmaStocks Backtesting Examples
+Chimera Backtesting Examples
 Quick reference for common backtesting commands
 """
 
 def show_examples():
     """Display example commands"""
     
-    print("🚀 SigmaStocks Backtesting Examples")
+    print("🚀 Chimera Backtesting Examples")
     print("=" * 50)
     
     examples = [

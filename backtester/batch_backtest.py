@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive Algorithm Testing
+Chimera Comprehensive Algorithm Testing
 Tests across multiple time periods, market conditions, and sectors
 """
 
@@ -66,7 +66,7 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
 def main():
     """Run comprehensive tests"""
     
-    print("🚀 COMPREHENSIVE ALGORITHM TESTING")
+    print("🚀 CHIMERA COMPREHENSIVE ALGORITHM TESTING")
     print("Testing across multiple time periods, market conditions, and sectors")
     print("=" * 80)
     

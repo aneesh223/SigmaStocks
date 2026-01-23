@@ -110,7 +110,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
 
 def main():
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("   📈 SIGMASTOCKS: AI SENTIMENT ANALYZER")
+    print("   📈 ORTHRUS: AI SENTIMENT ANALYZER")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     
     while True:

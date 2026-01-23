@@ -1,5 +1,5 @@
 """
-Alpaca Backtesting System for SigmaStocks
+Alpaca Backtesting System for Orthrus
 Runs trading strategies against historical Alpaca data with realistic simulation
 """
 

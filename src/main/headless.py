@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-SigmaStocks Headless Analysis CLI
+Orthrus Headless Analysis CLI
 Usage: python headless.py <ticker> <strategy> <period> [--save]
 """
 
@@ -71,7 +71,7 @@ def main():
     # We check all arguments for the flag
     save_plot = '--save' in sys.argv
     
-    print(f"\n🚀 SigmaStocks Headless Analysis: {ticker}")
+    print(f"\n🚀 Orthrus Headless Analysis: {ticker}")
     print("-" * 50)
     
     try:

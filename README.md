@@ -1,10 +1,10 @@
-# SigmaStocks: AI-Powered Algorithmic Trading Engine
+# Orthrus: AI-Powered Algorithmic Trading Engine
 
 **An advanced algorithmic trading platform that combines DistilRoBERTa transformer models with sophisticated technical analysis to generate data-driven investment insights. Features comprehensive backtesting, adaptive risk management, and market regime detection for systematic trading strategies.**
 
-## 🎯 **What Makes SigmaStocks Special**
+## 🎯 **What Makes Orthrus Special**
 
-- **🤖 Hybrid AI Sentiment Analysis**: Combines VADER + DistilRoBERTa for superior financial news interpretation
+- **🤖 Hybrid AI Sentiment Analysis (Hence the Name)**: Combines VADER + DistilRoBERTa for superior financial news interpretation
 - **📈 Adaptive Market Regime Detection**: Automatically adjusts strategy based on BULL/BEAR/SIDEWAYS market conditions  
 - **🎯 Comprehensive Testing Framework**: Extensive backtesting across multiple market scenarios and timeframes
 - **🛡️ Advanced Risk Management**: Dynamic stop-loss, take-profit, and volatility protection systems
@@ -146,8 +146,8 @@ The revolutionary hybrid approach combines two complementary AI models:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/yourusername/sigmastocks.git
-   cd sigmastocks
+   git clone https://github.com/yourusername/orthrus.git
+   cd orthrus
    ```
 
 2. **Create virtual environment**
