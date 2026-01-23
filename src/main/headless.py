@@ -19,13 +19,18 @@ plt.show = lambda: None
 from datetime import datetime
 import pytz
 
-# Add 'src' to python path to import internal modules
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
+# Add parent directories to python path to import internal modules
+current_dir = os.path.dirname(__file__)
+parent_dir = os.path.join(current_dir, '..')
+root_dir = os.path.join(parent_dir, '..')
+sys.path.insert(0, parent_dir)  # Add src/ to path
+sys.path.insert(0, root_dir)    # Add project root to path
 
 try:
-    from main import analyze_stock
+    from input import analyze_stock
 except ImportError:
-    print("❌ Error: Could not import 'src/main.py'. Run this script from the project root.")
+    print("❌ Error: Could not import 'input.py'. Make sure you're running from the correct directory.")
+    print("   Try: python src/main/headless.py <ticker> <strategy> <period>")
     sys.exit(1)
 
 def parse_period(period_arg, next_arg=None):

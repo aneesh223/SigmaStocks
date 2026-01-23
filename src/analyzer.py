@@ -431,7 +431,17 @@ def clean_headline(text):
         'break losing streak': 'rally', 'snaps losing streak': 'rally',
         'recovers from': 'rally', 'bounce back': 'rally',
         'top pick': 'best stock', 'buy rating': 'strong buy', 'strong buy': 'excellent',
-        'outperform': 'winner', 'stock to buy': 'good investment'
+        'outperform': 'winner', 'stock to buy': 'good investment',
+        
+        # CONTEXT-AWARE FIXES: Handle contrarian/bullish statements
+        'saying it would miss': 'predicting decline but wrong',  # Cramer-style contrarian
+        'would miss': 'expected to decline',
+        'has it wrong': 'incorrect bearish prediction',
+        'wall street has it wrong': 'incorrect bearish prediction',
+        'numbers are too low': 'estimates too conservative',
+        'estimates too low': 'conservative estimates',
+        'was trashing': 'unfairly criticized',
+        'trashing': 'criticizing unfairly'
     }
     
     for phrase, replacement in replacements.items():
