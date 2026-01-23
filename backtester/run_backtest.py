@@ -34,7 +34,8 @@ def parse_period(period_arg, next_arg=None):
     try:
         # Try to parse as number of days
         days = int(period_arg)
-        end_date = datetime.now(pytz.utc)
+        # Use 1 year ago as end date for more stable historical data
+        end_date = datetime.now(pytz.utc) - timedelta(days=365)
         start_date = end_date - timedelta(days=days)
         return start_date, end_date, 1  # Return 1 to indicate we used 1 argument
     except ValueError:

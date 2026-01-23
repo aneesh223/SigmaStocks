@@ -252,7 +252,7 @@ python backtester/run_backtest.py TSLA m 30
 # Advanced backtest: AAPL value strategy, 180 days, $50k capital, save results
 python backtester/run_backtest.py AAPL v 180 50000 --save
 
-# Comprehensive testing across 17 scenarios
+# Comprehensive testing across multiple scenarios
 python backtester/batch_backtest.py
 
 # View usage examples
