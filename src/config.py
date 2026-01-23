@@ -7,7 +7,6 @@ load_dotenv()
 # Fetch keys safely
 API_KEY = os.getenv("ALPACA_API_KEY")
 API_SECRET = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL = os.getenv("ALPACA_ENDPOINT", "https://paper-api.alpaca.markets")
 
 # Validation check
 if not API_KEY or not API_SECRET:
