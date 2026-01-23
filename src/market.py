@@ -64,11 +64,17 @@ def calculate_z_score(prices, window=50):
     # Convert to numpy array for faster computation
     prices_array = prices.values
     
+    if len(prices_array) == 0:
+        return 0.0
+    
     # Vectorized rolling calculations using numpy
     rolling_mean = pd.Series(prices_array).rolling(window=window).mean()
     rolling_std = pd.Series(prices_array).rolling(window=window).std()
     
-    # Get the most recent values
+    # Get the most recent values with bounds checking
+    if len(rolling_mean) == 0 or len(rolling_std) == 0:
+        return 0.0
+        
     current_price = prices_array[-1]
     current_mean = rolling_mean.iloc[-1]
     current_std = rolling_std.iloc[-1]
@@ -91,11 +97,19 @@ def calculate_golden_death_cross(prices, short_period=50, long_period=200):
     if len(sma_short) < 2 or len(sma_long) < 2:
         return 0.0, False, False, sma_short, sma_long
     
-    # Check for crossovers
-    prev_short = sma_short.iloc[-2]
-    prev_long = sma_long.iloc[-2]
-    curr_short = sma_short.iloc[-1]
-    curr_long = sma_long.iloc[-1]
+    # Check for crossovers with bounds checking
+    try:
+        prev_short = sma_short.iloc[-2]
+        prev_long = sma_long.iloc[-2]
+        curr_short = sma_short.iloc[-1]
+        curr_long = sma_long.iloc[-1]
+        
+        # Validate values
+        if pd.isna(prev_short) or pd.isna(prev_long) or pd.isna(curr_short) or pd.isna(curr_long):
+            return 0.0, False, False, sma_short, sma_long
+            
+    except IndexError:
+        return 0.0, False, False, sma_short, sma_long
     
     # Golden Cross: SMA(50) crosses above SMA(200)
     golden_cross = (prev_short <= prev_long) and (curr_short > curr_long)
@@ -136,13 +150,22 @@ def calculate_macd(prices, fast=12, slow=26, signal=9):
     # Vectorized crossover detection
     bullish_crossover = False
     if len(macd_line) >= 2:
-        # Check if MACD crossed above signal line
-        prev_diff = macd_line.iloc[-2] - signal_line.iloc[-2]
-        curr_diff = macd_line.iloc[-1] - signal_line.iloc[-1]
-        bullish_crossover = prev_diff <= 0 and curr_diff > 0
+        try:
+            # Check if MACD crossed above signal line
+            prev_diff = macd_line.iloc[-2] - signal_line.iloc[-2]
+            curr_diff = macd_line.iloc[-1] - signal_line.iloc[-1]
+            
+            # Validate values
+            if not (pd.isna(prev_diff) or pd.isna(curr_diff)):
+                bullish_crossover = prev_diff <= 0 and curr_diff > 0
+        except IndexError:
+            bullish_crossover = False
     
-    return (float(macd_line.iloc[-1]), float(signal_line.iloc[-1]), 
-            float(histogram.iloc[-1]), bullish_crossover)
+    try:
+        return (float(macd_line.iloc[-1]), float(signal_line.iloc[-1]), 
+                float(histogram.iloc[-1]), bullish_crossover)
+    except (IndexError, ValueError):
+        return (0.0, 0.0, 0.0, False)
 
 def calculate_rsi(prices, window=14):
     """Calculate RSI using vectorized operations"""
@@ -171,7 +194,12 @@ def calculate_rsi(prices, window=14):
     rs = avg_gains / avg_losses
     rsi = 100 - (100 / (1 + rs))
     
-    return float(rsi.iloc[-1]) if not np.isnan(rsi.iloc[-1]) else 50.0
+    try:
+        final_rsi = float(rsi.iloc[-1]) if not pd.isna(rsi.iloc[-1]) else 50.0
+    except (IndexError, ValueError):
+        final_rsi = 50.0
+        
+    return final_rsi
 
 @lru_cache(maxsize=200)
 def calculate_value_score(z_score):
@@ -729,26 +757,35 @@ def detect_market_regime(ticker: str, lookback_days: int = 60) -> str:
     from logic import detect_market_regime as shared_detect_market_regime
     return shared_detect_market_regime(ticker=ticker, lookback_days=lookback_days)
 
-def get_adaptive_risk_params(market_regime: str) -> dict:
+def get_adaptive_risk_params(market_regime: str, strategy: str = "momentum") -> dict:
     """
-    Get risk parameters using shared logic
+    Get risk parameters using shared logic with strategy-specific optimizations
     Automatically stays in sync with any improvements
     """
     from logic import get_adaptive_risk_params as shared_get_adaptive_risk_params
-    return shared_get_adaptive_risk_params(market_regime)
+    return shared_get_adaptive_risk_params(market_regime, strategy=strategy)
 
-def calculate_adaptive_thresholds(score_history: list, market_regime: str, lookback: int = 20) -> tuple:
+def calculate_adaptive_thresholds(score_history: list, market_regime: str, lookback: int = 20, strategy: str = "momentum") -> tuple:
     """
-    Calculate adaptive thresholds using shared logic
+    Calculate adaptive thresholds using shared logic with strategy-specific optimizations
     Automatically stays in sync with any improvements
     """
     from logic import calculate_adaptive_thresholds as shared_calculate_adaptive_thresholds
-    return shared_calculate_adaptive_thresholds(score_history, market_regime, lookback)
+    return shared_calculate_adaptive_thresholds(score_history, market_regime, lookback, strategy)
 
-def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df: pd.DataFrame) -> dict:
+def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df: pd.DataFrame, strategy: str = "momentum") -> dict:
     """
     Convert Final_Buy_Score into concrete BUY/HOLD/SELL recommendation
-    Uses shared logic for consistency
+    Uses shared logic for consistency with strategy-specific optimizations and bull market duration scaling
     """
     from logic import get_trading_recommendation as shared_get_trading_recommendation
-    return shared_get_trading_recommendation(ticker, final_buy_score, sentiment_df)
+    
+    # Get price data for bull market duration calculation
+    import yfinance as yf
+    try:
+        stock = yf.Ticker(ticker)
+        price_data = stock.history(period="6mo")  # 6 months for regime detection
+    except:
+        price_data = None
+    
+    return shared_get_trading_recommendation(ticker, final_buy_score, sentiment_df, price_data, strategy=strategy)

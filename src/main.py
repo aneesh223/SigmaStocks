@@ -73,7 +73,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
     
     if verdict:
         # Get trading recommendation using backtester-proven logic
-        trading_rec = market.get_trading_recommendation(ticker, verdict['Final_Buy_Score'], sentiment_df)
+        trading_rec = market.get_trading_recommendation(ticker, verdict['Final_Buy_Score'], sentiment_df, strategy=strategy_mode)
         
         print("\n" + "="*50)
         print(f"   ANALYSIS FOR {company_name} ({ticker})")
