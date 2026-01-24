@@ -221,10 +221,12 @@ python backtester/run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [
 
 #### Advanced Testing
 ```bash
-# Comprehensive multi-scenario testing
-python backtester/batch_backtest.py
+# Random batch testing (new flexible approach)
+python backtester/batch_backtest.py           # Run 10 random backtests
+python backtester/batch_backtest.py 25        # Run 25 random backtests  
+python backtester/batch_backtest.py 50 --seed 123  # Reproducible results
 
-# View all examples and tips
+# View all usage examples and tips
 python backtester/examples.py
 ```
 
@@ -323,6 +325,7 @@ python backtester/examples.py
 - **Validation**: Test multiple tickers to validate strategy robustness
 - **Market Conditions**: Test across different market regimes (bull/bear/sideways)
 - **Capital Testing**: Try different starting amounts to test scalability
+- **Random Testing**: Use batch_backtest.py for diverse, unbiased testing across sectors and time periods
 
 ### Performance Optimization
 - **Efficient Data Processing**: All sentiment analysis done once at startup
