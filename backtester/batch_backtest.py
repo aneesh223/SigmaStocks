@@ -1,13 +1,86 @@
 #!/usr/bin/env python3
 """
-Chimera Comprehensive Algorithm Testing
-Tests across multiple time periods, market conditions, and sectors
+Orthrus Random Batch Backtesting
+Randomly selects from pools of tickers, strategies, and date ranges for comprehensive testing
 """
 
 import subprocess
 import sys
 import os
-from datetime import datetime
+import random
+import argparse
+from datetime import datetime, timedelta
+
+def get_random_date_range():
+    """
+    Generate random start and end dates within Alpaca free tier support
+    Alpaca free tier supports data from ~2015 onwards
+    We'll use 2020-2024 for good data quality and recent market conditions
+    """
+    # Define the available date range (Alpaca free tier with good data quality)
+    start_year = 2020
+    end_year = 2024
+    
+    # Generate random start date
+    start_date = datetime(
+        year=random.randint(start_year, end_year - 1),
+        month=random.randint(1, 12),
+        day=random.randint(1, 28)  # Use 28 to avoid month-end issues
+    )
+    
+    # Generate random period length (30-365 days)
+    min_days = 30
+    max_days = 365
+    period_days = random.randint(min_days, max_days)
+    
+    end_date = start_date + timedelta(days=period_days)
+    
+    # Ensure end date doesn't exceed our range
+    if end_date.year > end_year:
+        end_date = datetime(end_year, 12, 31)
+    
+    # Ensure we don't go into the future (leave some buffer)
+    max_end_date = datetime.now() - timedelta(days=15)  # 15 days buffer for API limits
+    if end_date > max_end_date:
+        end_date = max_end_date
+        # Adjust start date if needed
+        if (end_date - start_date).days < min_days:
+            start_date = end_date - timedelta(days=min_days)
+    
+    return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
+
+def get_ticker_pools():
+    """Define pools of tickers by category for diverse testing"""
+    return {
+        'mega_cap_tech': ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'],
+        'large_cap_tech': ['NFLX', 'ADBE', 'CRM', 'ORCL', 'INTC', 'AMD', 'AVGO'],
+        'financials': ['JPM', 'BAC', 'WFC', 'GS', 'MS', 'C', 'BRK.B'],
+        'healthcare': ['JNJ', 'PFE', 'UNH', 'ABBV', 'MRK', 'TMO', 'DHR'],
+        'consumer': ['KO', 'PEP', 'WMT', 'HD', 'MCD', 'NKE', 'SBUX'],
+        'energy': ['XOM', 'CVX', 'COP', 'EOG', 'SLB', 'MPC', 'VLO'],
+        'industrials': ['BA', 'CAT', 'GE', 'MMM', 'HON', 'UPS', 'RTX'],
+        'volatile_growth': ['TSLA', 'NVDA', 'AMD', 'NFLX', 'ZOOM', 'ROKU', 'PLTR']
+    }
+
+def select_random_parameters():
+    """Randomly select ticker, strategy, and date range"""
+    ticker_pools = get_ticker_pools()
+    
+    # Randomly select a category and then a ticker from that category
+    category = random.choice(list(ticker_pools.keys()))
+    ticker = random.choice(ticker_pools[category])
+    
+    # Randomly select strategy
+    strategy = random.choice(['m', 'v'])  # momentum or value
+    
+    # Generate random date range
+    start_date, end_date = get_random_date_range()
+    
+    # Create description
+    strategy_name = "MOMENTUM" if strategy == 'm' else "VALUE"
+    description = f"RANDOM TEST: {ticker} {strategy_name} strategy ({category.replace('_', ' ').title()})"
+    
+    return ticker, strategy, start_date, end_date, description, category
 
 def run_backtest(ticker, strategy, start_date, end_date, description=""):
     """Run a single backtest and capture results"""
@@ -20,7 +93,7 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
     print('='*80)
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout
         
         if result.returncode == 0:
             # Extract key metrics from output
@@ -38,7 +111,7 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
                     buy_hold_return = line.split(":")[1].strip()
                 elif "Alpha (Outperformance):" in line:
                     alpha = line.split(":")[1].strip()
-                elif "🔄 Number of Trades:" in line:
+                elif "Number of Trades:" in line:
                     trades = line.split(":")[1].strip()
                 elif "Initial Regime:" in line:
                     regime = line.split(":")[1].strip()
@@ -59,130 +132,130 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
             print(f"FAILED: {result.stderr}")
             return {'success': False, 'ticker': ticker, 'strategy': strategy.upper(), 'error': result.stderr}
             
+    except subprocess.TimeoutExpired:
+        print(f"TIMEOUT: Test took longer than 5 minutes")
+        return {'success': False, 'ticker': ticker, 'strategy': strategy.upper(), 'error': 'Timeout'}
     except Exception as e:
         print(f"ERROR: {e}")
         return {'success': False, 'ticker': ticker, 'strategy': strategy.upper(), 'error': str(e)}
 
 def main():
-    """Run comprehensive tests"""
+    """Run random batch tests"""
     
-    print("CHIMERA COMPREHENSIVE ALGORITHM TESTING")
-    print("Testing across multiple time periods, market conditions, and sectors")
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Orthrus Random Batch Backtesting')
+    parser.add_argument('num_tests', type=int, nargs='?', default=10, 
+                       help='Number of random backtests to run (default: 10)')
+    parser.add_argument('--seed', type=int, help='Random seed for reproducible results')
+    
+    args = parser.parse_args()
+    
+    # Set random seed if provided
+    if args.seed:
+        random.seed(args.seed)
+        print(f"Using random seed: {args.seed}")
+    
+    print("ORTHRUS RANDOM BATCH BACKTESTING")
+    print(f"Running {args.num_tests} random backtests across diverse market conditions")
     print("=" * 80)
-    
-    # Test configurations: (ticker, strategy, start_date, end_date, description)
-    test_configs = [
-        # BULL MARKETS - Different sectors
-        ('TSLA', 'm', '2023-01-01', '2023-03-01', 'BULL MARKET: Tesla momentum in strong bull run'),
-        ('NVDA', 'm', '2023-05-01', '2023-08-01', 'STRONG BULL: NVIDIA AI boom momentum'),
-        ('AAPL', 'm', '2023-10-01', '2023-12-01', 'BULL MARKET: Apple momentum in tech rally'),
-        ('MSFT', 'm', '2023-01-01', '2023-04-01', 'BULL MARKET: Microsoft momentum in AI hype'),
-        
-        # VALUE STRATEGIES - Different conditions
-        ('AAPL', 'v', '2023-03-01', '2023-06-01', 'VALUE: Apple during sideways consolidation'),
-        ('MSFT', 'v', '2023-01-01', '2023-03-01', 'VALUE: Microsoft during mixed conditions'),
-        ('TSLA', 'v', '2023-06-01', '2023-09-01', 'VALUE: Tesla during volatile summer'),
-        
-        # DIFFERENT SECTORS
-        ('JPM', 'm', '2023-01-01', '2023-04-01', 'FINANCIALS: JPMorgan momentum strategy'),
-        ('XOM', 'v', '2023-01-01', '2023-04-01', 'ENERGY: Exxon value strategy'),
-        ('JNJ', 'v', '2023-01-01', '2023-04-01', 'HEALTHCARE: J&J defensive value'),
-        
-        # DIFFERENT TIME PERIODS
-        ('TSLA', 'm', '2023-02-01', '2023-04-01', 'SHORT TERM: 2-month Tesla momentum'),
-        ('AAPL', 'm', '2023-01-01', '2023-06-01', 'MEDIUM TERM: 5-month Apple momentum'),
-        ('NVDA', 'v', '2023-03-01', '2023-08-01', 'LONG TERM: 5-month NVIDIA value'),
-        
-        # VOLATILE CONDITIONS
-        ('TSLA', 'm', '2023-04-01', '2023-07-01', 'HIGH VOLATILITY: Tesla spring volatility'),
-        ('NVDA', 'm', '2023-08-01', '2023-11-01', 'POST-BOOM: NVIDIA after AI peak'),
-        
-        # MIXED CONDITIONS
-        ('AAPL', 'v', '2023-07-01', '2023-10-01', 'MIXED: Apple summer to fall transition'),
-        ('MSFT', 'm', '2023-06-01', '2023-09-01', 'MIXED: Microsoft summer momentum'),
-    ]
-    
-    # For quick testing, uncomment the line below to run just one test:
-    # test_configs = [('TSLA', 'm', '2023-01-01', '2023-03-01', 'QUICK TEST: Tesla momentum')]
     
     results = []
     successful = 0
     
-    for ticker, strategy, start_date, end_date, description in test_configs:
+    # Generate and run random tests
+    for i in range(args.num_tests):
+        print(f"\n[TEST {i+1}/{args.num_tests}]")
+        
+        # Generate random parameters
+        ticker, strategy, start_date, end_date, description, category = select_random_parameters()
+        
+        # Run the backtest
         result = run_backtest(ticker, strategy, start_date, end_date, description)
+        result['category'] = category  # Add category for analysis
         results.append(result)
+        
         if result['success']:
             successful += 1
+            # Show quick result
+            alpha = result.get('alpha', 'N/A')
+            trades = result.get('trades', 'N/A')
+            print(f"✅ Result: {alpha} alpha, {trades} trades")
+        else:
+            print(f"❌ Failed: {result.get('error', 'Unknown error')}")
     
     # Print comprehensive summary
     print(f"\n{'='*80}")
-    print(f"COMPREHENSIVE TEST RESULTS")
+    print(f"RANDOM BATCH TEST RESULTS")
     print(f"{'='*80}")
-    print(f"Successful Tests: {successful}/{len(test_configs)}")
+    print(f"Successful Tests: {successful}/{args.num_tests} ({successful/args.num_tests*100:.1f}%)")
     print()
     
-    # Group results by category
-    bull_markets = []
-    value_strategies = []
-    sectors = []
-    volatility_tests = []
+    # Analyze results by category
+    successful_results = [r for r in results if r['success']]
     
-    for result in results:
-        if result['success']:
-            if 'BULL' in result['description']:
-                bull_markets.append(result)
-            elif 'VALUE' in result['description']:
-                value_strategies.append(result)
-            elif any(sector in result['description'] for sector in ['FINANCIALS', 'ENERGY', 'HEALTHCARE']):
-                sectors.append(result)
-            elif 'VOLATILITY' in result['description'] or 'MIXED' in result['description']:
-                volatility_tests.append(result)
-    
-    # Print category summaries
-    categories = [
-        ("BULL MARKET PERFORMANCE", bull_markets),
-        ("VALUE STRATEGY PERFORMANCE", value_strategies), 
-        ("SECTOR DIVERSIFICATION", sectors),
-        ("VOLATILITY & MIXED CONDITIONS", volatility_tests)
-    ]
-    
-    for category_name, category_results in categories:
-        if category_results:
-            print(f"\n{category_name}")
+    if successful_results:
+        # Group by category
+        categories = {}
+        for result in successful_results:
+            cat = result['category']
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append(result)
+        
+        # Print category analysis
+        for category, cat_results in categories.items():
+            print(f"\n{category.replace('_', ' ').upper()} ({len(cat_results)} tests)")
             print("-" * 60)
-            for result in category_results:
+            
+            for result in cat_results:
                 alpha_color = "🟢" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) > 0 else "🔴" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) < -5 else "🟡"
                 print(f"{alpha_color} {result['ticker']} {result['strategy']}: {result['alpha']} alpha | {result['trades']} trades | {result['regime']}")
                 print(f"   Strategy: {result['strategy_return']} vs Buy-Hold: {result['buy_hold_return']}")
-                print(f"   {result['description']}")
+                print(f"   Period: {result['period']}")
                 print()
-    
-    # Calculate overall statistics
-    successful_results = [r for r in results if r['success']]
-    if successful_results:
+        
+        # Calculate overall statistics
         alphas = []
+        momentum_alphas = []
+        value_alphas = []
+        
         for result in successful_results:
             if result['alpha']:
                 try:
                     alpha_val = float(result['alpha'].replace('%', '').replace('+', ''))
                     alphas.append(alpha_val)
+                    
+                    if result['strategy'] == 'M':
+                        momentum_alphas.append(alpha_val)
+                    else:
+                        value_alphas.append(alpha_val)
                 except:
                     pass
         
         if alphas:
             avg_alpha = sum(alphas) / len(alphas)
             positive_alpha_count = sum(1 for a in alphas if a > 0)
-            near_zero_count = sum(1 for a in alphas if -2 <= a <= 2)  # Within 2% of buy-hold
+            near_zero_count = sum(1 for a in alphas if -2 <= a <= 2)
             
             print(f"\nOVERALL STATISTICS")
             print("-" * 40)
             print(f"Average Alpha: {avg_alpha:+.2f}%")
             print(f"Positive Alpha: {positive_alpha_count}/{len(alphas)} ({positive_alpha_count/len(alphas)*100:.1f}%)")
             print(f"Near Buy-Hold (±2%): {near_zero_count}/{len(alphas)} ({near_zero_count/len(alphas)*100:.1f}%)")
+            
+            if momentum_alphas:
+                momentum_avg = sum(momentum_alphas) / len(momentum_alphas)
+                print(f"Momentum Strategy Avg: {momentum_avg:+.2f}% ({len(momentum_alphas)} tests)")
+            
+            if value_alphas:
+                value_avg = sum(value_alphas) / len(value_alphas)
+                print(f"Value Strategy Avg: {value_avg:+.2f}% ({len(value_alphas)} tests)")
     
     print(f"\n{'='*80}")
+    print("TIP: Run with --seed <number> for reproducible results")
+    print("TIP: Increase number of tests for more comprehensive analysis")
     
-    return 0 if successful == len(test_configs) else 1
+    return 0 if successful > 0 else 1
 
 if __name__ == "__main__":
     exit(main())

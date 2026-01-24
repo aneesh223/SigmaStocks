@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Chimera Backtesting Examples
+Orthrus Backtesting Examples
 Quick reference for common backtesting commands
 """
 
 def show_examples():
     """Display example commands"""
     
-    print("Chimera Backtesting Examples")
+    print("Orthrus Backtesting Examples")
     print("=" * 50)
     
     examples = [
@@ -63,8 +63,10 @@ def show_examples():
     print("  • Value works best with 90-180 day periods")
     print("  • Test multiple tickers to validate strategy robustness")
     
-    print(f"\n🔄 Batch Testing:")
-    print("  python batch_backtest.py    # Run multiple configurations")
+    print(f"\nBatch Testing:")
+    print("  python batch_backtest.py           # Run 10 random backtests (default)")
+    print("  python batch_backtest.py 25        # Run 25 random backtests")
+    print("  python batch_backtest.py 50 --seed 123  # Run 50 tests with reproducible seed")
 
 if __name__ == "__main__":
     show_examples()

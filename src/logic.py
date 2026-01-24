@@ -100,10 +100,128 @@ def calculate_adaptive_profit_target(entry_price: float, current_price: float, b
     return adaptive_target
 
 
+def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
+    """
+    Detect choppy/sideways market conditions that are unfavorable for trading
+    
+    Args:
+        prices: Series of closing prices
+        lookback_days: Number of days to analyze
+        
+    Returns:
+        Dict with choppy market analysis
+    """
+    try:
+        if len(prices) < max(10, lookback_days // 2):
+            return {'is_choppy': False, 'choppiness_score': 0.0, 'reason': 'Insufficient data'}
+        
+        recent_prices = prices.tail(lookback_days)
+        returns = recent_prices.pct_change().dropna()
+        
+        if len(returns) < 5:
+            return {'is_choppy': False, 'choppiness_score': 0.0, 'reason': 'Insufficient returns data'}
+        
+        # 1. DIRECTIONAL MOVEMENT INDEX (ADX-like calculation)
+        # Measures trend strength - low values indicate choppy markets
+        high_low_range = recent_prices.rolling(2).apply(lambda x: abs(x.iloc[1] - x.iloc[0]), raw=False)
+        avg_range = high_low_range.mean()
+        
+        # Calculate directional movement
+        up_moves = returns[returns > 0].sum()
+        down_moves = abs(returns[returns < 0].sum())
+        total_movement = up_moves + down_moves
+        
+        if total_movement > 0:
+            directional_index = abs(up_moves - down_moves) / total_movement
+        else:
+            directional_index = 0
+        
+        # 2. PRICE OSCILLATION ANALYSIS
+        # Count how many times price crosses the moving average (whipsaws)
+        sma_10 = recent_prices.rolling(10).mean()
+        price_above_sma = recent_prices > sma_10
+        crossovers = (price_above_sma != price_above_sma.shift(1)).sum()
+        crossover_rate = crossovers / len(recent_prices) if len(recent_prices) > 0 else 0
+        
+        # 3. VOLATILITY vs TREND ANALYSIS
+        # High volatility with low net movement indicates choppiness
+        volatility = returns.std() * (252 ** 0.5)  # Annualized
+        net_return = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+        
+        if volatility > 0:
+            efficiency_ratio = abs(net_return) / volatility
+        else:
+            efficiency_ratio = 0
+        
+        # 4. CONSECUTIVE REVERSALS
+        # Count consecutive days of direction changes
+        direction_changes = (returns.shift(1) * returns < 0).sum()
+        reversal_rate = direction_changes / len(returns) if len(returns) > 0 else 0
+        
+        # 5. RANGE-BOUND BEHAVIOR
+        # Check if price is stuck in a narrow range
+        price_range = (recent_prices.max() - recent_prices.min()) / recent_prices.mean()
+        
+        # CHOPPINESS SCORING (0-1, higher = more choppy)
+        choppiness_factors = {
+            'low_directional_movement': max(0, 0.3 - directional_index) * 3.33,  # 0-1
+            'high_crossover_rate': min(1, crossover_rate * 5),  # 0-1
+            'low_efficiency': max(0, 0.1 - efficiency_ratio) * 10,  # 0-1
+            'high_reversal_rate': min(1, reversal_rate * 2),  # 0-1
+            'narrow_range': max(0, 0.15 - price_range) * 6.67 if price_range < 0.15 else 0  # 0-1
+        }
+        
+        # Weighted choppiness score
+        weights = {
+            'low_directional_movement': 0.25,
+            'high_crossover_rate': 0.25,
+            'low_efficiency': 0.20,
+            'high_reversal_rate': 0.20,
+            'narrow_range': 0.10
+        }
+        
+        choppiness_score = sum(choppiness_factors[factor] * weights[factor] 
+                              for factor in choppiness_factors)
+        
+        # CHOPPY MARKET THRESHOLDS
+        choppy_threshold = 0.6  # Above this = choppy market
+        very_choppy_threshold = 0.8  # Above this = very choppy
+        
+        is_choppy = choppiness_score > choppy_threshold
+        is_very_choppy = choppiness_score > very_choppy_threshold
+        
+        # Generate reason
+        main_factors = [factor for factor, score in choppiness_factors.items() 
+                       if score > 0.3]
+        
+        if is_very_choppy:
+            reason = f"VERY CHOPPY: {', '.join(main_factors[:2])}"
+        elif is_choppy:
+            reason = f"CHOPPY: {', '.join(main_factors[:2])}"
+        else:
+            reason = "TRENDING: Directional movement detected"
+        
+        return {
+            'is_choppy': is_choppy,
+            'is_very_choppy': is_very_choppy,
+            'choppiness_score': choppiness_score,
+            'directional_index': directional_index,
+            'crossover_rate': crossover_rate,
+            'efficiency_ratio': efficiency_ratio,
+            'reversal_rate': reversal_rate,
+            'price_range': price_range,
+            'factors': choppiness_factors,
+            'reason': reason
+        }
+        
+    except Exception as e:
+        return {'is_choppy': False, 'choppiness_score': 0.0, 'reason': f'Error: {e}'}
+
+
 def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lookback_days: int = 30) -> str:
     """
     Detect current market regime (BULL, BEAR, SIDEWAYS) for adaptive strategy
-    Enhanced with price volatility protection to prevent overtrading in volatile conditions
+    REFINED: Choppiness override for early bull transitions, softened return thresholds, exposure preservation
     
     Args:
         ticker: Stock symbol (if price_data not provided)
@@ -111,7 +229,7 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
         lookback_days: Days to analyze for regime detection
         
     Returns:
-        Market regime: "BULL", "STRONG_BULL", "BEAR", "STRONG_BEAR", or "SIDEWAYS"
+        Market regime: "BULL", "STRONG_BULL", "BEAR", "STRONG_BEAR", "SIDEWAYS", "CHOPPY", or "CHOPPY_SIDEWAYS"
     """
     try:
         # Get price data if not provided
@@ -158,17 +276,43 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
         else:
             recent_momentum = 0
         
-        # DEBUG: Print key metrics for analysis
-        print(f"REGIME DETECTION DEBUG: return={total_return:.1%}, volatility={volatility:.1%}, momentum={recent_momentum:.1%}, price_vs_sma20={end_price > sma_20}")
+        # MEDIUM-TERM MOMENTUM for choppiness override (20-30 day window)
+        medium_term_return = 0
+        if len(prices) >= 25:
+            medium_start = prices.iloc[-25]
+            medium_end = prices.iloc[-1]
+            if medium_start > 0:
+                medium_term_return = (medium_end - medium_start) / medium_start
         
-        # VOLATILITY OVERRIDE: Extreme price volatility should force SIDEWAYS classification
-        # BUT: Allow higher volatility during strong uptrends (bull markets deserve volatility tolerance)
-        extreme_volatility_threshold = 0.8  # 80% annualized volatility (lowered from 120%)
+        # TREND PERSISTENCE: Check if price is above medium-term moving average
+        trend_persistence = end_price > sma_20
         
-        # BULL MARKET VOLATILITY TOLERANCE: Don't override bull signals due to volatility alone
+        # CHOPPY MARKET DETECTION - Critical for avoiding whipsaw losses
+        choppy_analysis = detect_choppy_market(prices, lookback_days)
+        choppiness_score = choppy_analysis['choppiness_score']
+        is_choppy = choppy_analysis['is_choppy']
+        is_very_choppy = choppy_analysis['is_very_choppy']
+        
+        # CHOPPINESS OVERRIDE (Critical): Allow bull behavior when trend and momentum align
+        # Prevents delayed re-entry during early bull transitions
+        choppy_override = False
+        if (is_choppy or is_very_choppy):
+            # Check if medium-term momentum is positive AND trend persistence exists
+            if medium_term_return > 0.05 and trend_persistence and recent_momentum > 0.02:
+                choppy_override = True
+                print(f"CHOPPINESS OVERRIDE: Medium-term momentum (+{medium_term_return:.1%}) and trend persistence override choppy classification")
+        
+        # Apply choppiness classification only if override conditions not met
+        if is_very_choppy and not choppy_override:
+            return "CHOPPY_SIDEWAYS"
+        elif is_choppy and not choppy_override:
+            return "CHOPPY"
+        
+        # REDUCED VOLATILITY OVERRIDE: Only apply in extreme cases and not in clear bull trends
+        extreme_volatility_threshold = 1.2  # 120% annualized volatility
+        
         if volatility > extreme_volatility_threshold:
             # Check if this is a strong uptrend that deserves volatility tolerance
-            # Use more recent data (last 20 days) for bull market detection during high volatility
             if len(prices) >= 20:
                 recent_20_start = prices.iloc[-20]
                 recent_20_end = prices.iloc[-1]
@@ -179,37 +323,281 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
             else:
                 recent_20_return = total_return
             
-            # More aggressive bull market detection for high volatility periods
-            if recent_20_return > 0.10 and end_price > sma_20 and recent_momentum > 0.02:
-                # Strong recent bull market with momentum - allow higher volatility
-                bull_volatility_threshold = min(1.5, extreme_volatility_threshold * 2.0)  # Up to 150% volatility allowed
+            # BULL MARKET VOLATILITY TOLERANCE: Allow much higher volatility in bull trends
+            if recent_20_return > 0.15 and end_price > sma_20 and recent_momentum > 0.03:
+                # Strong recent bull market with momentum - allow very high volatility
+                bull_volatility_threshold = 2.0  # Up to 200% volatility allowed in bull markets
                 if volatility <= bull_volatility_threshold:
-                    print(f"BULL MARKET VOLATILITY TOLERANCE: {volatility:.1%} volatility allowed due to recent strong uptrend (+{recent_20_return:.1%} 20-day return, momentum: {recent_momentum:.1%})")
                     # Continue with normal bull market detection below
+                    pass
                 else:
-                    print(f"EXTREME VOLATILITY OVERRIDE: {volatility:.1%} exceeds bull market tolerance ({bull_volatility_threshold:.1%}) - forcing SIDEWAYS regime")
-                    return "SIDEWAYS"
+                    return "SIDEWAYS"  # Only override if volatility is truly extreme (>200%)
             else:
-                print(f"EXTREME PRICE VOLATILITY DETECTED: {volatility:.1%} annualized - forcing SIDEWAYS regime to prevent overtrading")
-                print(f"    Recent 20-day return: {recent_20_return:.1%}, momentum: {recent_momentum:.1%}")
-                return "SIDEWAYS"
+                # Not a clear bull trend - apply volatility override at lower threshold
+                if volatility > 1.5:  # 150% threshold for non-bull trends
+                    return "SIDEWAYS"
         
-        # More aggressive bull market detection for maximum participation
-        # REMOVE VOLATILITY CONSTRAINTS - let volatility tolerance handle it instead
-        if total_return > 0.20 and end_price > sma_20 > sma_50 and recent_momentum > 0.05:
-            return "STRONG_BULL"  # Strong uptrend with momentum (no volatility constraint)
-        elif total_return > 0.10 and end_price > sma_20 and recent_momentum > 0.02:
-            return "BULL"  # Uptrend with momentum (no volatility constraint)
-        elif total_return > 0.05 and end_price > sma_20:
-            return "BULL"  # Moderate uptrend (no volatility constraint) - still bullish
-        elif total_return < -0.20 and end_price < sma_20 < sma_50:
-            return "STRONG_BEAR"  # Strong downtrend
-        elif total_return < -0.10 and end_price < sma_20:
-            return "BEAR"  # Downtrend
+        # SOFTENED RETURN THRESHOLDS: Complement absolute returns with trend persistence and momentum
+        # Prevents suppression of slow bull markets during low-volatility grind-ups
+        
+        # Strong bull: High returns OR strong trend persistence with momentum
+        if (total_return > 0.20 and end_price > sma_20 > sma_50 and recent_momentum > 0.05) or \
+           (total_return > 0.12 and trend_persistence and recent_momentum > 0.04 and medium_term_return > 0.08):
+            return "STRONG_BULL"
+        
+        # Regular bull: Moderate returns OR trend persistence with positive momentum
+        elif (total_return > 0.08 and end_price > sma_20 and recent_momentum > 0.025) or \
+             (total_return > 0.04 and trend_persistence and recent_momentum > 0.02 and medium_term_return > 0.04):
+            return "BULL"
+        
+        # Mild bull: Favor participation - low returns but clear trend and momentum
+        elif total_return > 0.02 and trend_persistence and recent_momentum > 0.015:
+            return "BULL"  # Gradual bullish classification during grind-ups
+        
+        # Bear markets: Require stronger evidence for bear classification (asymmetric transitions)
+        elif total_return < -0.25 and end_price < sma_20 < sma_50 and recent_momentum < -0.05:
+            return "STRONG_BEAR"  # Strong downtrend - higher threshold
+        elif total_return < -0.15 and end_price < sma_20 and recent_momentum < -0.03:
+            return "BEAR"  # Downtrend - higher threshold
         else:
-            # Check for hidden bull momentum even in sideways markets
-            if recent_momentum > 0.03:
-                return "BULL"  # Momentum override - treat as bull market (no volatility constraint)
+            # EXPOSURE PRESERVATION: When ambiguous, favor maintaining exposure
+            # Momentum override for borderline cases - favor bull classification
+            if recent_momentum > 0.02 or (trend_persistence and medium_term_return > 0.02):
+                return "BULL"  # Default to maintaining exposure when ambiguous
+            return "SIDEWAYS"  # Neutral market
+            
+    except Exception as e:
+        print(f"Market regime detection failed: {e}")
+        return "SIDEWAYS"  # Safe default
+
+
+# Global regime state tracking for transition smoothing
+_regime_history = []
+_current_stable_regime = None
+
+def get_stable_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lookback_days: int = 30) -> str:
+    """
+    Get market regime with transition smoothing to prevent flip-flopping
+    REFINED: Asymmetric transitions, regime persistence requirements, exposure preservation
+    
+    Args:
+        ticker: Stock symbol (if price_data not provided)
+        price_data: Historical price data (if ticker not provided)
+        lookback_days: Days to analyze for regime detection
+        
+    Returns:
+        Stable market regime with transition smoothing applied
+    """
+    global _regime_history, _current_stable_regime
+    
+    # Get raw regime classification
+    raw_regime = detect_market_regime(ticker, price_data, lookback_days)
+    
+    # Initialize if first call
+    if _current_stable_regime is None:
+        _current_stable_regime = raw_regime
+        _regime_history = [raw_regime]
+        return raw_regime
+    
+    # Add to history (keep last 5 evaluations for smoothing)
+    _regime_history.append(raw_regime)
+    if len(_regime_history) > 5:
+        _regime_history.pop(0)
+    
+    # REGIME TRANSITION SMOOTHING with asymmetric requirements
+    consecutive_needed = 2  # Minimum consecutive evaluations for regime change
+    
+    # Count consecutive occurrences of new regime
+    consecutive_count = 0
+    for i in range(len(_regime_history) - 1, -1, -1):
+        if _regime_history[i] == raw_regime:
+            consecutive_count += 1
+        else:
+            break
+    
+    # ASYMMETRIC TRANSITION RULES
+    current_is_bull = _current_stable_regime in ["BULL", "STRONG_BULL"]
+    new_is_bull = raw_regime in ["BULL", "STRONG_BULL"]
+    current_is_bear = _current_stable_regime in ["BEAR", "STRONG_BEAR"]
+    new_is_bear = raw_regime in ["BEAR", "STRONG_BEAR"]
+    
+    # EXPOSURE PRESERVATION INVARIANT: Once bullish exposure established, don't reduce without strong evidence
+    if current_is_bull and not new_is_bull:
+        # Transitioning away from bull - require stronger evidence (3 consecutive)
+        required_consecutive = 3
+        if consecutive_count >= required_consecutive:
+            print(f"REGIME TRANSITION: {_current_stable_regime} → {raw_regime} (required {required_consecutive} consecutive, got {consecutive_count})")
+            _current_stable_regime = raw_regime
+        else:
+            print(f"EXPOSURE PRESERVATION: Maintaining {_current_stable_regime} (need {required_consecutive} consecutive {raw_regime}, have {consecutive_count})")
+            return _current_stable_regime
+    
+    # BEAR → BULL: Require confirmation but not as strict
+    elif current_is_bear and new_is_bull:
+        required_consecutive = 2  # Standard requirement for bear to bull
+        if consecutive_count >= required_consecutive:
+            print(f"REGIME TRANSITION: {_current_stable_regime} → {raw_regime} (bear to bull confirmation)")
+            _current_stable_regime = raw_regime
+        else:
+            return _current_stable_regime
+    
+    # BULL → STRONGER BULL: Allow immediate upgrade
+    elif current_is_bull and new_is_bull and raw_regime == "STRONG_BULL" and _current_stable_regime == "BULL":
+        print(f"REGIME UPGRADE: {_current_stable_regime} → {raw_regime} (immediate bull upgrade)")
+        _current_stable_regime = raw_regime
+    
+    # Standard transitions: Require minimum consecutive
+    elif consecutive_count >= consecutive_needed:
+        if raw_regime != _current_stable_regime:
+            print(f"REGIME TRANSITION: {_current_stable_regime} → {raw_regime}")
+        _current_stable_regime = raw_regime
+    
+    return _current_stable_regime
+    """
+    Detect current market regime (BULL, BEAR, SIDEWAYS) for adaptive strategy
+    REFINED: Choppiness override for early bull transitions, softened return thresholds, exposure preservation
+    
+    Args:
+        ticker: Stock symbol (if price_data not provided)
+        price_data: Historical price data (if ticker not provided)
+        lookback_days: Days to analyze for regime detection
+        
+    Returns:
+        Market regime: "BULL", "STRONG_BULL", "BEAR", "STRONG_BEAR", "SIDEWAYS", "CHOPPY", or "CHOPPY_SIDEWAYS"
+    """
+    try:
+        # Get price data if not provided
+        if price_data is None:
+            if ticker is None:
+                return "SIDEWAYS"
+            stock = yf.Ticker(ticker)
+            price_data = stock.history(period=f"{lookback_days + 10}d")
+        
+        if len(price_data) < lookback_days:
+            return "SIDEWAYS"  # Default if not enough data
+        
+        recent_data = price_data.tail(lookback_days)
+        prices = recent_data['Close']
+        
+        if len(prices) < 2:
+            return "SIDEWAYS"  # Need at least 2 data points
+        
+        # Calculate trend metrics
+        start_price = prices.iloc[0]
+        end_price = prices.iloc[-1]
+        
+        if start_price <= 0:
+            return "SIDEWAYS"  # Invalid start price
+            
+        total_return = (end_price - start_price) / start_price
+        
+        # Calculate moving averages for trend confirmation
+        sma_20 = prices.rolling(20).mean().iloc[-1]
+        sma_50 = prices.rolling(50).mean().iloc[-1] if len(prices) >= 50 else sma_20
+        
+        # Calculate volatility (standard deviation of returns)
+        returns = prices.pct_change().dropna()
+        volatility = returns.std() * (252 ** 0.5)  # Annualized volatility
+        
+        # Calculate momentum indicators
+        if len(prices) >= 20:
+            recent_10_mean = prices.iloc[-10:].mean()
+            prev_10_mean = prices.iloc[-20:-10].mean()
+            if prev_10_mean > 0:
+                recent_momentum = (recent_10_mean - prev_10_mean) / prev_10_mean
+            else:
+                recent_momentum = 0
+        else:
+            recent_momentum = 0
+        
+        # MEDIUM-TERM MOMENTUM for choppiness override (20-30 day window)
+        medium_term_return = 0
+        if len(prices) >= 25:
+            medium_start = prices.iloc[-25]
+            medium_end = prices.iloc[-1]
+            if medium_start > 0:
+                medium_term_return = (medium_end - medium_start) / medium_start
+        
+        # TREND PERSISTENCE: Check if price is above medium-term moving average
+        trend_persistence = end_price > sma_20
+        
+        # CHOPPY MARKET DETECTION - Critical for avoiding whipsaw losses
+        choppy_analysis = detect_choppy_market(prices, lookback_days)
+        choppiness_score = choppy_analysis['choppiness_score']
+        is_choppy = choppy_analysis['is_choppy']
+        is_very_choppy = choppy_analysis['is_very_choppy']
+        
+        # CHOPPINESS OVERRIDE (Critical): Allow bull behavior when trend and momentum align
+        # Prevents delayed re-entry during early bull transitions
+        choppy_override = False
+        if (is_choppy or is_very_choppy):
+            # Check if medium-term momentum is positive AND trend persistence exists
+            if medium_term_return > 0.05 and trend_persistence and recent_momentum > 0.02:
+                choppy_override = True
+                print(f"CHOPPINESS OVERRIDE: Medium-term momentum (+{medium_term_return:.1%}) and trend persistence override choppy classification")
+        
+        # Apply choppiness classification only if override conditions not met
+        if is_very_choppy and not choppy_override:
+            return "CHOPPY_SIDEWAYS"
+        elif is_choppy and not choppy_override:
+            return "CHOPPY"
+        
+        # REDUCED VOLATILITY OVERRIDE: Only apply in extreme cases and not in clear bull trends
+        extreme_volatility_threshold = 1.2  # 120% annualized volatility
+        
+        if volatility > extreme_volatility_threshold:
+            # Check if this is a strong uptrend that deserves volatility tolerance
+            if len(prices) >= 20:
+                recent_20_start = prices.iloc[-20]
+                recent_20_end = prices.iloc[-1]
+                if recent_20_start > 0:
+                    recent_20_return = (recent_20_end - recent_20_start) / recent_20_start
+                else:
+                    recent_20_return = 0
+            else:
+                recent_20_return = total_return
+            
+            # BULL MARKET VOLATILITY TOLERANCE: Allow much higher volatility in bull trends
+            if recent_20_return > 0.15 and end_price > sma_20 and recent_momentum > 0.03:
+                # Strong recent bull market with momentum - allow very high volatility
+                bull_volatility_threshold = 2.0  # Up to 200% volatility allowed in bull markets
+                if volatility <= bull_volatility_threshold:
+                    # Continue with normal bull market detection below
+                    pass
+                else:
+                    return "SIDEWAYS"  # Only override if volatility is truly extreme (>200%)
+            else:
+                # Not a clear bull trend - apply volatility override at lower threshold
+                if volatility > 1.5:  # 150% threshold for non-bull trends
+                    return "SIDEWAYS"
+        
+        # SOFTENED RETURN THRESHOLDS: Complement absolute returns with trend persistence and momentum
+        # Prevents suppression of slow bull markets during low-volatility grind-ups
+        
+        # Strong bull: High returns OR strong trend persistence with momentum
+        if (total_return > 0.20 and end_price > sma_20 > sma_50 and recent_momentum > 0.05) or \
+           (total_return > 0.12 and trend_persistence and recent_momentum > 0.04 and medium_term_return > 0.08):
+            return "STRONG_BULL"
+        
+        # Regular bull: Moderate returns OR trend persistence with positive momentum
+        elif (total_return > 0.08 and end_price > sma_20 and recent_momentum > 0.025) or \
+             (total_return > 0.04 and trend_persistence and recent_momentum > 0.02 and medium_term_return > 0.04):
+            return "BULL"
+        
+        # Mild bull: Favor participation - low returns but clear trend and momentum
+        elif total_return > 0.02 and trend_persistence and recent_momentum > 0.015:
+            return "BULL"  # Gradual bullish classification during grind-ups
+        
+        # Bear markets: Require stronger evidence for bear classification (asymmetric transitions)
+        elif total_return < -0.25 and end_price < sma_20 < sma_50 and recent_momentum < -0.05:
+            return "STRONG_BEAR"  # Strong downtrend - higher threshold
+        elif total_return < -0.15 and end_price < sma_20 and recent_momentum < -0.03:
+            return "BEAR"  # Downtrend - higher threshold
+        else:
+            # EXPOSURE PRESERVATION: When ambiguous, favor maintaining exposure
+            # Momentum override for borderline cases - favor bull classification
+            if recent_momentum > 0.02 or (trend_persistence and medium_term_return > 0.02):
+                return "BULL"  # Default to maintaining exposure when ambiguous
             return "SIDEWAYS"  # Neutral market
             
     except Exception as e:
@@ -257,7 +645,7 @@ def calculate_price_volatility(ticker: str = None, price_data: pd.DataFrame = No
 def get_adaptive_risk_params(market_regime: str, price_volatility: float = None, strategy: str = "momentum", bull_market_duration: int = 0) -> Dict:
     """
     Get adaptive risk management parameters based on market regime, price volatility, and strategy
-    Enhanced with volatility-adjusted risk management, strategy-specific optimizations, and bull market duration scaling
+    REFACTORED: Volatility no longer reduces conviction in bull regimes - favors market participation over prediction
     
     Args:
         market_regime: Current market regime
@@ -272,30 +660,43 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
     if price_volatility is None:
         price_volatility = 0.3  # 30% default
     
-    # VOLATILITY ADJUSTMENT FACTORS
-    # Base multipliers for different volatility levels
-    if price_volatility > 1.5:  # Extreme volatility (>150%)
-        vol_stop_multiplier = 3.0    # Much wider stops
-        vol_profit_multiplier = 0.6  # Lower profit targets
-        vol_position_multiplier = 0.4  # Much smaller positions
-        vol_trail_multiplier = 3.5   # Much wider trailing stops
-        print(f"EXTREME VOLATILITY DETECTED: {price_volatility:.1%} - applying maximum risk protection")
-    elif price_volatility > 1.0:  # High volatility (>100%)
-        vol_stop_multiplier = 2.0    # Wider stops
-        vol_profit_multiplier = 0.7  # Slightly lower profit targets
-        vol_position_multiplier = 0.6  # Smaller positions
-        vol_trail_multiplier = 2.5   # Wider trailing stops
-        print(f"HIGH VOLATILITY DETECTED: {price_volatility:.1%} - applying enhanced risk protection")
-    elif price_volatility > 0.6:  # Moderate-high volatility (>60%)
-        vol_stop_multiplier = 1.5    # Moderately wider stops
-        vol_profit_multiplier = 0.85 # Slightly lower profit targets
-        vol_position_multiplier = 0.8  # Slightly smaller positions
-        vol_trail_multiplier = 1.8   # Moderately wider trailing stops
-    else:  # Normal volatility (≤60%)
-        vol_stop_multiplier = 1.0    # Standard parameters
-        vol_profit_multiplier = 1.0
-        vol_position_multiplier = 1.0
-        vol_trail_multiplier = 1.0
+    # VOLATILITY ADJUSTMENT FACTORS - BULL REGIME PROTECTION
+    # Volatility penalties ONLY apply in BEAR regimes - bull regimes maintain full conviction
+    if market_regime in ["BULL", "STRONG_BULL"]:
+        # Bull regimes: Volatility affects position sizing only, NOT conviction or direction
+        vol_stop_multiplier = 1.0    # No volatility penalty on stops in bull markets
+        vol_profit_multiplier = 1.0  # No volatility penalty on profit targets in bull markets
+        vol_position_multiplier = max(0.7, 1.0 - (price_volatility - 0.3) * 0.3)  # Mild position sizing adjustment only
+        vol_trail_multiplier = 1.0   # No volatility penalty on trailing stops in bull markets
+        # No volatility warnings in bull regimes - volatility is expected and acceptable
+    elif market_regime in ["BEAR", "STRONG_BEAR"]:
+        # Bear regimes: Full volatility penalties to protect capital
+        if price_volatility > 1.5:  # Extreme volatility (>150%)
+            vol_stop_multiplier = 3.0    # Much wider stops
+            vol_profit_multiplier = 0.6  # Lower profit targets
+            vol_position_multiplier = 0.4  # Much smaller positions
+            vol_trail_multiplier = 3.5   # Much wider trailing stops
+        elif price_volatility > 1.0:  # High volatility (>100%)
+            vol_stop_multiplier = 2.0    # Wider stops
+            vol_profit_multiplier = 0.7  # Slightly lower profit targets
+            vol_position_multiplier = 0.6  # Smaller positions
+            vol_trail_multiplier = 2.5   # Wider trailing stops
+        elif price_volatility > 0.6:  # Moderate-high volatility (>60%)
+            vol_stop_multiplier = 1.5    # Moderately wider stops
+            vol_profit_multiplier = 0.85 # Slightly lower profit targets
+            vol_position_multiplier = 0.8  # Slightly smaller positions
+            vol_trail_multiplier = 1.8   # Moderately wider trailing stops
+        else:  # Normal volatility (≤60%)
+            vol_stop_multiplier = 1.0    # Standard parameters
+            vol_profit_multiplier = 1.0
+            vol_position_multiplier = 1.0
+            vol_trail_multiplier = 1.0
+    else:
+        # Neutral regimes: Moderate volatility sensitivity
+        vol_stop_multiplier = 1.0 + min((price_volatility - 0.6) * 0.5, 0.5)  # Mild adjustment
+        vol_profit_multiplier = max(0.8, 1.0 - (price_volatility - 0.6) * 0.3)
+        vol_position_multiplier = max(0.6, 1.0 - (price_volatility - 0.6) * 0.4)
+        vol_trail_multiplier = 1.0 + min((price_volatility - 0.6) * 0.8, 0.8)
     
     # VALUE STRATEGY OPTIMIZATIONS: More conservative, longer holding periods
     if strategy.lower() == "value":
@@ -318,54 +719,44 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
         value_min_hold_multiplier = 1.0
         value_threshold_multiplier = 1.0
     
-    # Base parameters by regime with moderate bull market duration scaling
+    # Base parameters by regime with EXPOSURE BIAS - favor market participation in bull regimes
     if market_regime == "STRONG_BULL":
-        # Moderate bull market scaling for maximum participation
-        duration_multiplier = min(1.0 + (bull_market_duration / 30.0), 3.0)  # Scale up to 3x over 30 days
-        
+        # Strong bull: Aggressive exposure, minimal exits, assume positive drift
         base_params = {
-            'stop_loss_pct': -0.18 * duration_multiplier,      # Wide stops (up to -54%)
-            'take_profit_pct': 2.0 * duration_multiplier,      # Much higher targets (up to 600%) - was 0.40
-            'trailing_stop_pct': -0.50 * duration_multiplier,  # MUCH wider trailing stops (up to -150%)
-            'position_size_multiplier': 1.2 * duration_multiplier,  # Larger positions (up to 3.6x)
-            'threshold_tightness': 0.8 / max(duration_multiplier, 1.0),  # Tighter thresholds
-            'momentum_bias': 0.3 * duration_multiplier,         # Moderate bias toward staying invested
-            'trend_following': True,      # Enable trend-following mode
-            'conviction_multiplier': 1.5 * duration_multiplier, # Higher conviction (up to 4.5x)
-            'min_hold_days': max(7, int(21 * duration_multiplier)),  # Much longer holds (up to 63 days)
-            'volatility_protection': False, # DISABLE all volatility protection
+            'stop_loss_pct': -0.25,      # Wider stops to avoid noise exits
+            'take_profit_pct': 3.0,      # High targets to stay invested longer
+            'trailing_stop_pct': -0.60,  # Very wide trailing stops
+            'position_size_multiplier': 1.5,  # Larger positions for bull participation
+            'threshold_tightness': 0.6,  # Tighter thresholds = more trades = more exposure
+            'momentum_bias': 0.4,        # Strong bias toward staying invested
+            'trend_following': True,     # Enable trend-following mode
+            'conviction_multiplier': 2.0, # High conviction in bull markets
+            'min_hold_days': 21,         # Longer holds to reduce churn
+            'volatility_protection': False, # DISABLED - volatility is acceptable in bull markets
             'bull_duration_days': bull_market_duration,
-            'duration_scaling': duration_multiplier,
-            'overtrading_protection': True,  # Enable overtrading protection
-            'buy_and_hold_mode': duration_multiplier > 1.3  # Switch to buy-and-hold mode after 39 days
+            'duration_scaling': 1.0,     # No duration scaling - consistent behavior
+            'overtrading_protection': False,  # DISABLED - favor exposure over protection
+            'exposure_bias': True        # Favor BUY over HOLD when signals are neutral
         }
-        
-        if bull_market_duration > 20:
-            print(f"BULL SCALING: {bull_market_duration} days → {duration_multiplier:.1f}x enhanced aggressiveness")
             
     elif market_regime == "BULL":
-        # Moderate bull market duration scaling
-        duration_multiplier = min(1.0 + (bull_market_duration / 45.0), 2.5)  # Scale up to 2.5x over 45 days
-        
+        # Regular bull: Strong exposure bias, reduced exits
         base_params = {
-            'stop_loss_pct': -0.15 * duration_multiplier,      # Wide stops (up to -37.5%)
-            'take_profit_pct': 1.5 * duration_multiplier,      # Much higher targets (up to 375%) - was 0.30
-            'trailing_stop_pct': -0.40 * duration_multiplier,  # MUCH wider trailing stops (up to -100%)
-            'position_size_multiplier': 1.1 * duration_multiplier,  # Larger positions (up to 2.75x)
-            'threshold_tightness': 0.9 / max(duration_multiplier, 1.0),  # Tighter thresholds
-            'momentum_bias': 0.2 * duration_multiplier,        # Moderate bias
-            'trend_following': True,      # Enable trend-following mode
-            'conviction_multiplier': 1.3 * duration_multiplier, # Higher conviction (up to 3.25x)
-            'min_hold_days': max(5, int(15 * duration_multiplier)),  # Much longer holds (up to 37 days)
-            'volatility_protection': False, # DISABLE volatility override in bull markets
+            'stop_loss_pct': -0.20,      # Wide stops to avoid noise exits
+            'take_profit_pct': 2.0,      # High targets to stay invested
+            'trailing_stop_pct': -0.45,  # Wide trailing stops
+            'position_size_multiplier': 1.3,  # Larger positions
+            'threshold_tightness': 0.7,  # Tighter thresholds for more exposure
+            'momentum_bias': 0.3,        # Strong bias toward staying invested
+            'trend_following': True,     # Enable trend-following mode
+            'conviction_multiplier': 1.7, # High conviction
+            'min_hold_days': 14,         # Longer holds to reduce churn
+            'volatility_protection': False, # DISABLED - volatility acceptable in bull markets
             'bull_duration_days': bull_market_duration,
-            'duration_scaling': duration_multiplier,
-            'overtrading_protection': True,  # Enable overtrading protection
-            'buy_and_hold_mode': duration_multiplier > 1.5  # Switch to buy-and-hold mode after 45 days
+            'duration_scaling': 1.0,     # No duration scaling - consistent behavior
+            'overtrading_protection': False,  # DISABLED - favor exposure
+            'exposure_bias': True        # Favor BUY over HOLD when signals are neutral
         }
-        
-        if bull_market_duration > 30:
-            print(f"BULL SCALING: {bull_market_duration} days → {duration_multiplier:.1f}x enhanced aggressiveness")
             
     elif market_regime == "STRONG_BEAR":
         base_params = {
@@ -377,7 +768,7 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
             'momentum_bias': -0.3,        # Strong bias toward exiting positions
             'trend_following': False,     # Disable trend-following
             'conviction_multiplier': 0.7, # Lower conviction in bear markets
-            'min_hold_days': 0,          # No minimum holding period
+            'min_hold_days': 3,          # Minimum holding period even in bear markets
             'volatility_protection': False, # No volatility override needed
             'bull_duration_days': 0,     # Reset bull market duration
             'duration_scaling': 1.0
@@ -392,10 +783,45 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
             'momentum_bias': -0.15,       # Bias toward exiting
             'trend_following': False,     # Disable trend-following
             'conviction_multiplier': 0.8, # Lower conviction
-            'min_hold_days': 0,          # No minimum holding period
+            'min_hold_days': 3,          # Minimum holding period even in bear markets
             'volatility_protection': False, # No volatility override needed
             'bull_duration_days': 0,     # Reset bull market duration
             'duration_scaling': 1.0
+        }
+    elif market_regime == "CHOPPY":
+        # Choppy market: Very conservative parameters to avoid whipsaws
+        base_params = {
+            'stop_loss_pct': -0.05,      # Tight stop-loss to limit whipsaw damage
+            'take_profit_pct': 0.15,     # Lower profit targets
+            'trailing_stop_pct': -0.08,  # Tight trailing stop
+            'position_size_multiplier': 0.5,  # Much smaller positions
+            'threshold_tightness': 2.0,  # Much wider thresholds
+            'momentum_bias': 0.0,        # No bias
+            'trend_following': False,    # Disable trend-following
+            'conviction_multiplier': 0.5, # Lower conviction
+            'min_hold_days': 7,          # Longer minimum holding to avoid noise
+            'volatility_protection': True, # Enable volatility protection
+            'bull_duration_days': 0,     # Reset bull market duration
+            'duration_scaling': 1.0,
+            'choppy_protection': True    # Enable choppy market protection
+        }
+    elif market_regime == "CHOPPY_SIDEWAYS":
+        # Very choppy market: Extremely conservative, prefer cash
+        base_params = {
+            'stop_loss_pct': -0.03,      # Very tight stop-loss
+            'take_profit_pct': 0.10,     # Very low profit targets
+            'trailing_stop_pct': -0.05,  # Very tight trailing stop
+            'position_size_multiplier': 0.3,  # Minimal positions
+            'threshold_tightness': 3.0,  # Extremely wide thresholds
+            'momentum_bias': 0.0,        # No bias
+            'trend_following': False,    # Disable trend-following
+            'conviction_multiplier': 0.3, # Very low conviction
+            'min_hold_days': 10,         # Much longer minimum holding
+            'volatility_protection': True, # Enable volatility protection
+            'bull_duration_days': 0,     # Reset bull market duration
+            'duration_scaling': 1.0,
+            'choppy_protection': True,   # Enable choppy market protection
+            'avoid_new_positions': True  # Strongly prefer cash in very choppy markets
         }
     else:  # SIDEWAYS
         base_params = {
@@ -407,7 +833,7 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
             'momentum_bias': 0.0,         # No bias
             'trend_following': False,     # Standard mean-reversion
             'conviction_multiplier': 1.0, # Standard conviction
-            'min_hold_days': 1,          # Minimum holding period to reduce noise
+            'min_hold_days': 5,          # Longer minimum holding period to reduce noise
             'volatility_protection': False, # No volatility override needed
             'bull_duration_days': 0,     # Reset bull market duration
             'duration_scaling': 1.0
@@ -460,190 +886,74 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
 
 def calculate_adaptive_thresholds(score_history: List[float], market_regime: str, lookback: int = 20, strategy: str = "momentum", bull_market_duration: int = 0) -> Tuple[float, float]:
     """
-    Calculate adaptive buy/sell thresholds based on market regime, score volatility, strategy, and bull market duration
-    Enhanced with volatility override protection, value strategy optimizations, and bull market duration scaling
+    Calculate adaptive buy/sell thresholds based on market regime and score volatility
+    REFACTORED: Thresholds clamped within ±10% of base values for consistency, no short-term momentum changes
     
     Args:
         score_history: List of recent Final_Buy_Scores
         market_regime: Current market regime
         lookback: Number of recent scores to analyze
         strategy: Trading strategy ("momentum" or "value") for strategy-specific optimizations
-        bull_market_duration: Days in current bull market for adaptive scaling
+        bull_market_duration: Days in current bull market (IGNORED - no duration scaling for consistency)
         
     Returns:
         Tuple of (buy_threshold, sell_threshold)
     """
-    if len(score_history) < lookback:
-        # Not enough history, use regime-based defaults with strategy-specific adjustments
-        if strategy.lower() == "value":
-            # VALUE STRATEGY: More conservative thresholds, less frequent trading
-            if market_regime == "STRONG_BULL":
-                return 5.05, 4.85  # More conservative than momentum
-            elif market_regime == "BULL":
-                return 5.10, 4.90  # More conservative than momentum
-            elif market_regime == "STRONG_BEAR":
-                return 5.50, 4.50  # Much wider thresholds
-            elif market_regime == "BEAR":
-                return 5.35, 4.65  # Wider thresholds
-            else:
-                return 5.15, 4.85  # More conservative SIDEWAYS
-        else:
-            # MOMENTUM STRATEGY: Aggressive thresholds for maximum participation
-            if market_regime == "STRONG_BULL":
-                return 4.85, 4.70  # Aggressive thresholds for maximum participation
-            elif market_regime == "BULL":
-                return 4.90, 4.80  # Aggressive thresholds
-            elif market_regime == "STRONG_BEAR":
-                return 5.35, 4.65  # Very wide thresholds for strong bear markets
-            elif market_regime == "BEAR":
-                return 5.20, 4.80  # Wider thresholds for selectivity
-            else:
-                return 5.02, 4.98  # Standard thresholds
-    
-    recent_scores = score_history[-lookback:]
-    mean_score = np.mean(recent_scores)
-    std_score = np.std(recent_scores)
-    
-    # Get regime-specific parameters with strategy and bull market duration
-    risk_params = get_adaptive_risk_params(market_regime, strategy=strategy, bull_market_duration=bull_market_duration)
-    tightness = risk_params['threshold_tightness']
-    momentum_bias = risk_params.get('momentum_bias', 0.0)
-    
-    # BULL MARKET DURATION SCALING: Make thresholds more aggressive as bull market continues
-    duration_scaling = 1.0
-    if market_regime in ["BULL", "STRONG_BULL"] and bull_market_duration > 20:
-        # Moderate scaling for sustained bull markets
-        if market_regime == "STRONG_BULL":
-            duration_scaling = min(1.0 + (bull_market_duration / 30.0), 3.0)  # Up to 3x more aggressive over 30 days
-        else:  # BULL
-            duration_scaling = min(1.0 + (bull_market_duration / 45.0), 2.5)  # Up to 2.5x more aggressive over 45 days
-        
-        tightness /= duration_scaling  # Tighter thresholds
-        momentum_bias *= duration_scaling  # Stronger momentum bias
-        
-        if bull_market_duration > 30:
-            print(f"THRESHOLD SCALING: {bull_market_duration} days → {duration_scaling:.1f}x threshold tightening")
-    
-    # VALUE STRATEGY ADJUSTMENTS: Wider thresholds for less frequent trading
+    # BASE THRESHOLDS - stable and regime-specific, no complex adaptivity
     if strategy.lower() == "value":
-        # Value strategy benefits from wider thresholds to avoid overtrading
-        tightness *= 1.5  # Make thresholds 50% wider
-        momentum_bias *= 0.5  # Reduce momentum bias for value stocks
-        
-        # Only print once per function call
-        if not hasattr(calculate_adaptive_thresholds, '_value_msg_shown'):
-            print(f"VALUE THRESHOLD ADJUSTMENT: Making thresholds 50% wider for less frequent trading")
-            calculate_adaptive_thresholds._value_msg_shown = True
-    
-    # VOLATILITY OVERRIDE: Detect extreme volatility scenarios
-    volatility_threshold = 0.3  # If std_score > 0.3, consider it extreme volatility
-    is_extreme_volatility = std_score > volatility_threshold
-    
-    # Adaptive volatility factor with volatility override protection
-    base_volatility_factor = min(std_score * 2, 0.8)  # Increased cap from 0.5 to 0.8
-    
-    # Apply volatility override - force wider thresholds for extreme volatility
-    # BUT: Be less aggressive in bull markets where volatility is expected
-    if is_extreme_volatility:
-        # Override aggressive regimes with conservative parameters
+        # VALUE STRATEGY: More conservative, wider spreads
         if market_regime in ["STRONG_BULL", "BULL"]:
-            # BULL MARKET VOLATILITY TOLERANCE: Reduce volatility override strength
-            if market_regime == "STRONG_BULL":
-                # Strong bull markets get more volatility tolerance
-                volatility_override_strength = 0.5  # Reduce override by 50%
-                print(f"BULL VOLATILITY TOLERANCE: Reducing volatility override by 50% for {market_regime} (σ={std_score:.3f})")
-            else:  # BULL
-                # Regular bull markets get some volatility tolerance  
-                volatility_override_strength = 0.7  # Reduce override by 30%
-                print(f"BULL VOLATILITY TOLERANCE: Reducing volatility override by 30% for {market_regime} (σ={std_score:.3f})")
-            
-            tightness = max(tightness, 1.8 * volatility_override_strength)  # Reduced override
-            momentum_bias = min(momentum_bias, 0.1 + (0.2 * (1 - volatility_override_strength)))  # Less bias reduction
-        else:
-            # Non-bull markets get full volatility override
-            print(f"VOLATILITY OVERRIDE: Extreme volatility detected (σ={std_score:.3f}), applying conservative thresholds despite {market_regime} regime")
-            tightness = max(tightness, 1.8)  # Force wider thresholds
-            momentum_bias = min(momentum_bias, 0.1)  # Reduce momentum bias
-        
-        # Extra volatility protection
-        volatility_protection_factor = min(std_score * 1.5, 1.0)  # Additional widening
-        adjusted_volatility_factor = (base_volatility_factor + volatility_protection_factor) * tightness
+            base_buy, base_sell = 5.10, 4.70  # Exposure bias in bull regimes
+        elif market_regime in ["STRONG_BEAR", "BEAR"]:
+            base_buy, base_sell = 5.50, 4.30  # Conservative in bear regimes
+        elif market_regime in ["CHOPPY", "CHOPPY_SIDEWAYS"]:
+            base_buy, base_sell = 5.80, 4.00  # Very wide for choppy markets
+        else:  # SIDEWAYS
+            base_buy, base_sell = 5.25, 4.60  # Moderate
     else:
-        # Normal volatility adjustment
-        adjusted_volatility_factor = base_volatility_factor * tightness
-    
-    # Enhanced momentum bias for bull markets (reduced for value strategy)
-    bias_adjustment = momentum_bias * 0.15
-    
-    # Calculate thresholds with volatility protection
-    buy_threshold = mean_score + adjusted_volatility_factor - bias_adjustment
-    sell_threshold = mean_score - adjusted_volatility_factor - bias_adjustment
-    
-    # Apply regime-specific bounds with volatility override protection and strategy adjustments
-    # BULL MARKET VOLATILITY TOLERANCE: Use less conservative bounds in bull markets
-    if is_extreme_volatility:
+        # MOMENTUM STRATEGY: Exposure-biased thresholds
         if market_regime in ["STRONG_BULL", "BULL"]:
-            # Bull markets get more aggressive bounds even with high volatility
-            if strategy.lower() == "value":
-                # VALUE STRATEGY: Moderately more conservative than momentum
-                if market_regime == "STRONG_BULL":
-                    buy_threshold = max(4.90, min(buy_threshold, 5.3))   # More aggressive than normal volatility override
-                    sell_threshold = max(4.2, min(sell_threshold, 4.85))
-                else:  # BULL
-                    buy_threshold = max(5.00, min(buy_threshold, 5.4))   # More aggressive than normal volatility override
-                    sell_threshold = max(4.3, min(sell_threshold, 4.90))
-            else:
-                # MOMENTUM STRATEGY: Aggressive bounds for bull market volatility tolerance
-                if market_regime == "STRONG_BULL":
-                    buy_threshold = max(4.80, min(buy_threshold, 5.2))   # Much more aggressive
-                    sell_threshold = max(4.1, min(sell_threshold, 4.75))  # Much more aggressive
-                else:  # BULL
-                    buy_threshold = max(4.90, min(buy_threshold, 5.3))   # More aggressive
-                    sell_threshold = max(4.2, min(sell_threshold, 4.85))  # More aggressive
-            
-            print(f"BULL VOLATILITY BOUNDS: Using aggressive thresholds despite volatility for {market_regime} market")
+            base_buy, base_sell = 5.05, 4.75  # Tight spread, exposure bias in bull regimes
+        elif market_regime in ["STRONG_BEAR", "BEAR"]:
+            base_buy, base_sell = 5.40, 4.40  # Conservative in bear regimes
+        elif market_regime in ["CHOPPY", "CHOPPY_SIDEWAYS"]:
+            base_buy, base_sell = 5.70, 4.10  # Wide for choppy markets
+        else:  # SIDEWAYS
+            base_buy, base_sell = 5.20, 4.65  # Moderate
+    
+    # MINIMAL ADAPTIVITY - only if sufficient history exists
+    if len(score_history) >= lookback:
+        recent_scores = score_history[-lookback:]
+        mean_score = np.mean(recent_scores)
+        std_score = np.std(recent_scores)
+        
+        # CLAMPED ADJUSTMENT - maximum ±10% deviation from base thresholds
+        max_adjustment = 0.1  # 10% maximum adjustment
+        
+        # Simple volatility adjustment - no complex regime overrides
+        volatility_factor = min(std_score * 0.5, max_adjustment)  # Capped at 10%
+        
+        # Apply minimal adjustment with exposure bias in bull regimes
+        if market_regime in ["BULL", "STRONG_BULL"]:
+            # Bull regimes: Bias toward lower buy thresholds (more exposure)
+            buy_adjustment = -volatility_factor * 0.5  # Favor buying
+            sell_adjustment = -volatility_factor * 0.3  # Resist selling
         else:
-            # Use conservative bounds for non-bull markets with extreme volatility
-            buy_threshold = max(5.05, min(buy_threshold, 6.0))   # Conservative bounds for extreme volatility
-            sell_threshold = max(4.0, min(sell_threshold, 4.95))
+            # Non-bull regimes: Standard volatility adjustment
+            buy_adjustment = volatility_factor
+            sell_adjustment = -volatility_factor
+        
+        # Apply clamped adjustments
+        buy_threshold = base_buy + buy_adjustment
+        sell_threshold = base_sell + sell_adjustment
+        
+        # HARD CLAMPS - ensure thresholds stay within ±10% of base values
+        buy_threshold = max(base_buy * 0.9, min(buy_threshold, base_buy * 1.1))
+        sell_threshold = max(base_sell * 0.9, min(sell_threshold, base_sell * 1.1))
     else:
-        # Normal regime-specific bounds with strategy adjustments and ULTRA-AGGRESSIVE bull market bounds
-        if strategy.lower() == "value":
-            # VALUE STRATEGY: More conservative bounds across all regimes
-            if market_regime == "STRONG_BULL":
-                buy_threshold = max(4.85, min(buy_threshold, 5.2))   # More conservative than momentum
-                sell_threshold = max(4.3, min(sell_threshold, 4.80))
-            elif market_regime == "BULL":
-                buy_threshold = max(4.95, min(buy_threshold, 5.3))   # More conservative than momentum
-                sell_threshold = max(4.4, min(sell_threshold, 4.90))
-            elif market_regime == "STRONG_BEAR":
-                buy_threshold = max(5.50, min(buy_threshold, 6.8))   # Much more conservative
-                sell_threshold = max(3.2, min(sell_threshold, 4.50))
-            elif market_regime == "BEAR":
-                buy_threshold = max(5.30, min(buy_threshold, 6.3))   # More conservative
-                sell_threshold = max(3.7, min(sell_threshold, 4.70))
-            else:  # SIDEWAYS
-                buy_threshold = max(5.15, min(buy_threshold, 6.0))   # More conservative
-                sell_threshold = max(4.0, min(sell_threshold, 4.85))
-        else:
-            # MOMENTUM STRATEGY: Moderate bounds for bull market participation
-            if market_regime == "STRONG_BULL":
-                # Aggressive: Buy more, sell less
-                buy_threshold = max(4.70, min(buy_threshold, 5.0))   # Aggressive bounds
-                sell_threshold = max(4.0, min(sell_threshold, 4.70))  # Reluctant to sell
-            elif market_regime == "BULL":
-                # Moderately aggressive: Bias toward buying and holding
-                buy_threshold = max(4.80, min(buy_threshold, 5.1))   # Moderately aggressive bounds
-                sell_threshold = max(4.2, min(sell_threshold, 4.80))  # Moderately reluctant to sell
-            elif market_regime == "STRONG_BEAR":
-                buy_threshold = max(5.30, min(buy_threshold, 6.5))   # Very conservative bounds
-                sell_threshold = max(3.5, min(sell_threshold, 4.70))
-            elif market_regime == "BEAR":
-                buy_threshold = max(5.10, min(buy_threshold, 6.0))   # Conservative bounds
-                sell_threshold = max(4.0, min(sell_threshold, 4.90))
-            else:  # SIDEWAYS
-                buy_threshold = max(5.01, min(buy_threshold, 5.8))
-                sell_threshold = max(4.2, min(sell_threshold, 4.99))
+        # Insufficient history - use base thresholds
+        buy_threshold = base_buy
+        sell_threshold = base_sell
     
     return buy_threshold, sell_threshold
 
@@ -651,7 +961,7 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
 def calculate_conviction_score(final_buy_score: float, score_history: List[float], market_regime: str) -> float:
     """
     Calculate conviction score based on signal strength and consistency
-    Enhanced with volatility protection to prevent overexposure in volatile conditions
+    REFACTORED: No volatility penalties in bull regimes - volatility is acceptable for market participation
     
     Args:
         final_buy_score: Current Final_Buy_Score
@@ -659,65 +969,55 @@ def calculate_conviction_score(final_buy_score: float, score_history: List[float
         market_regime: Current market regime
         
     Returns:
-        Conviction score (0.3 to 2.0) - multiplier for position sizing with volatility protection
+        Conviction score (0.5 to 2.0) - multiplier for position sizing
     """
     base_conviction = 1.0
     
     # Distance from neutral (5.0) indicates signal strength
     signal_strength = abs(final_buy_score - 5.0)
-    conviction_boost = min(signal_strength * 0.3, 0.5)  # Max 0.5 boost
+    conviction_boost = min(signal_strength * 0.3, 0.6)  # Max 0.6 boost
     
-    # Trend consistency bonus with volatility penalty
+    # Trend consistency bonus - NO volatility penalties in bull regimes
     if len(score_history) >= 5:
         recent_scores = score_history[-5:]
         score_volatility = np.std(recent_scores)
-        trend_consistency = 1.0 - (score_volatility / 2.0)  # Lower volatility = higher consistency
-        trend_consistency = max(0, min(trend_consistency, 0.3))  # Max 0.3 boost
-        conviction_boost += trend_consistency
         
-        # VOLATILITY PROTECTION: Reduce conviction for extreme score volatility
-        # BUT: Be more tolerant in bull markets where volatility is expected
-        if score_volatility > 0.3:  # Extreme volatility threshold
-            # BULL MARKET VOLATILITY TOLERANCE: Reduce penalty in bull markets
-            if market_regime in ["STRONG_BULL", "BULL"]:
-                if market_regime == "STRONG_BULL":
-                    volatility_penalty_reduction = 0.7  # Reduce penalty by 70%
-                else:  # BULL
-                    volatility_penalty_reduction = 0.5  # Reduce penalty by 50%
-                
-                volatility_penalty = min(score_volatility * 0.5, 0.4) * volatility_penalty_reduction  # Reduced penalty
-                print(f"BULL VOLATILITY TOLERANCE: Reducing conviction penalty by {(1-volatility_penalty_reduction)*100:.0f}% for {market_regime} (σ={score_volatility:.3f})")
-            else:
-                volatility_penalty = min(score_volatility * 0.5, 0.4)  # Full penalty for non-bull markets
-                print(f"VOLATILITY PROTECTION: High score volatility (σ={score_volatility:.3f}), reducing position size")
-            
-            conviction_boost -= volatility_penalty
+        # Consistency bonus based on trend direction, not volatility
+        if len(recent_scores) >= 3:
+            trend_direction = recent_scores[-1] - recent_scores[0]
+            if abs(trend_direction) > 0.1:  # Clear trend
+                conviction_boost += min(abs(trend_direction) * 0.2, 0.3)  # Max 0.3 boost
+        
+        # BULL REGIME PROTECTION: No volatility penalties in bull markets
+        if market_regime in ["BULL", "STRONG_BULL"]:
+            # Volatility is expected and acceptable in bull markets - no penalties
+            pass
+        elif market_regime in ["BEAR", "STRONG_BEAR"]:
+            # Apply volatility penalties only in bear markets for capital protection
+            if score_volatility > 0.4:  # High volatility threshold for bear markets
+                volatility_penalty = min(score_volatility * 0.3, 0.3)
+                conviction_boost -= volatility_penalty
+        else:
+            # Neutral regimes: Mild volatility consideration
+            if score_volatility > 0.5:  # Very high volatility threshold
+                volatility_penalty = min(score_volatility * 0.2, 0.2)
+                conviction_boost -= volatility_penalty
     
-    # Market regime bonus with volatility override
-    risk_params = get_adaptive_risk_params(market_regime)
-    volatility_protection = risk_params.get('volatility_protection', False)
-    
+    # Market regime bonus - favor exposure in bull regimes
     if market_regime in ["STRONG_BULL", "BULL"]:
-        regime_bonus = 0.2  # Extra conviction in bull markets
-        
-        # Apply volatility protection for bull markets
-        if volatility_protection and len(score_history) >= 10:
-            longer_volatility = np.std(score_history[-10:])
-            if longer_volatility > 0.25:  # High volatility over longer period
-                regime_bonus *= 0.5  # Reduce bull market bonus
-                print(f"VOLATILITY OVERRIDE: Reducing bull market conviction due to high volatility (σ={longer_volatility:.3f})")
-        
+        regime_bonus = 0.3  # Strong conviction boost in bull markets
         conviction_boost += regime_bonus
     elif market_regime in ["STRONG_BEAR"]:
-        conviction_boost -= 0.2  # Reduced conviction in strong bear markets
+        conviction_boost -= 0.2  # Reduced conviction in strong bear markets only
     
     final_conviction = base_conviction + conviction_boost
-    return max(0.3, min(final_conviction, 2.0))  # Clamp between 0.3x and 2.0x with lower minimum for volatility protection
+    return max(0.5, min(final_conviction, 2.0))  # Clamp between 0.5x and 2.0x
 
 
 def detect_momentum_reversal(price_data: pd.DataFrame, score_history: List[float], lookback_days: int = 10) -> Dict:
     """
     Detect momentum reversals using both price and sentiment signals
+    DISABLED: Reversal logic removed to prevent short-term noise from overriding regime-level decisions
     
     Args:
         price_data: Historical price data
@@ -725,111 +1025,17 @@ def detect_momentum_reversal(price_data: pd.DataFrame, score_history: List[float
         lookback_days: Days to analyze for reversal detection
         
     Returns:
-        Dictionary with reversal signals and strength
+        Dictionary with no reversal signals (disabled for consistency)
     """
-    try:
-        if len(price_data) < lookback_days or len(score_history) < 5:
-            return {'reversal_detected': False, 'type': None, 'strength': 0.0}
-        
-        recent_prices = price_data.tail(lookback_days)['Close']
-        recent_scores = score_history[-lookback_days:] if len(score_history) >= lookback_days else score_history
-        
-        if len(recent_prices) < 2 or len(recent_scores) < 2:
-            return {'reversal_detected': False, 'type': None, 'strength': 0.0}
-        
-        # PRICE MOMENTUM SIGNALS
-        # 1. Price acceleration (second derivative)
-        price_returns = recent_prices.pct_change().dropna()
-        if len(price_returns) >= 3:
-            try:
-                recent_acceleration = price_returns.iloc[-3:].mean() - price_returns.iloc[-6:-3].mean()
-            except IndexError:
-                recent_acceleration = 0
-        else:
-            recent_acceleration = 0
-            
-        # 2. Price trend strength
-        try:
-            if recent_prices.iloc[0] > 0:
-                price_trend = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
-            else:
-                price_trend = 0
-        except (IndexError, ZeroDivisionError):
-            price_trend = 0
-        
-        # 3. Price volatility (high volatility can signal reversals)
-        price_volatility = price_returns.std() if len(price_returns) > 1 else 0
-        
-        # SENTIMENT MOMENTUM SIGNALS
-        # 1. Sentiment acceleration
-        if len(recent_scores) >= 6:
-            sentiment_acceleration = np.mean(recent_scores[-3:]) - np.mean(recent_scores[-6:-3])
-        else:
-            sentiment_acceleration = 0
-            
-        # 2. Sentiment trend
-        if len(recent_scores) >= 2:
-            sentiment_trend = recent_scores[-1] - recent_scores[0]
-        else:
-            sentiment_trend = 0
-            
-        # 3. Sentiment-Price divergence (key reversal signal)
-        sentiment_direction = 1 if sentiment_trend > 0 else -1
-        price_direction = 1 if price_trend > 0 else -1
-        divergence = sentiment_direction != price_direction and abs(sentiment_trend) > 0.1 and abs(price_trend) > 0.02
-        
-        # REVERSAL DETECTION LOGIC
-        reversal_signals = []
-        
-        # Bullish reversal signals
-        if (recent_acceleration > 0.01 and sentiment_acceleration > 0.1) or \
-           (price_trend > 0.05 and sentiment_trend > 0.2) or \
-           (divergence and sentiment_direction > 0):
-            reversal_signals.append(('BULLISH', 0.7 if divergence else 0.5))
-            
-        # Bearish reversal signals  
-        if (recent_acceleration < -0.01 and sentiment_acceleration < -0.1) or \
-           (price_trend < -0.05 and sentiment_trend < -0.2) or \
-           (divergence and sentiment_direction < 0):
-            reversal_signals.append(('BEARISH', 0.7 if divergence else 0.5))
-            
-        # Strong momentum continuation (not reversal, but important)
-        if abs(recent_acceleration) > 0.02 and abs(sentiment_acceleration) > 0.15 and not divergence:
-            direction = 'BULLISH' if recent_acceleration > 0 else 'BEARISH'
-            reversal_signals.append((f'{direction}_ACCELERATION', 0.8))
-        
-        # Determine strongest signal
-        if reversal_signals:
-            strongest_signal = max(reversal_signals, key=lambda x: x[1])
-            return {
-                'reversal_detected': True,
-                'type': strongest_signal[0],
-                'strength': strongest_signal[1],
-                'price_trend': price_trend,
-                'sentiment_trend': sentiment_trend,
-                'divergence': divergence,
-                'acceleration': recent_acceleration,
-                'sentiment_acceleration': sentiment_acceleration
-            }
-        else:
-            return {
-                'reversal_detected': False,
-                'type': None,
-                'strength': 0.0,
-                'price_trend': price_trend,
-                'sentiment_trend': sentiment_trend,
-                'divergence': divergence
-            }
-            
-    except Exception as e:
-        print(f"Momentum reversal detection failed: {e}")
-        return {'reversal_detected': False, 'type': None, 'strength': 0.0}
+    # DISABLED: Short-term reversal detection causes more harm than good
+    # Favor slow, regime-level confirmation over short-term momentum changes
+    return {'reversal_detected': False, 'type': None, 'strength': 0.0, 'reason': 'Reversal detection disabled for consistency'}
 
 
 def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df: pd.DataFrame = None, price_data: pd.DataFrame = None, strategy: str = "momentum") -> Dict:
     """
     Convert Final_Buy_Score into concrete BUY/HOLD/SELL recommendation
-    Uses adaptive thresholds, market regime detection, volatility-adjusted risk management, momentum reversal detection, and strategy-specific optimizations
+    REFINED: Stable regime detection, exposure preservation invariant, drawdown acceptance
     
     Args:
         ticker: Stock symbol
@@ -841,14 +1047,24 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
     Returns:
         Dictionary with trading recommendation and details
     """
-    # Calculate price volatility for risk adjustment
+    # Calculate price volatility for risk adjustment (position sizing only in bull regimes)
     price_volatility = calculate_price_volatility(ticker, price_data)
     
-    # Detect current market regime
-    market_regime = detect_market_regime(ticker, price_data)
+    # Use stable regime detection with transition smoothing
+    market_regime = get_stable_market_regime(ticker, price_data)
     
-    # Calculate bull market duration for adaptive scaling
-    bull_market_duration = calculate_bull_market_duration(price_data, market_regime) if price_data is not None else 0
+    # SENTIMENT-BASED CHOPPINESS OVERRIDE: If regime is choppy but sentiment is strongly positive, allow bull behavior
+    # This prevents delayed re-entry during early bull transitions when sentiment leads price action
+    if market_regime in ["CHOPPY", "CHOPPY_SIDEWAYS"] and len(score_history) > 0:
+        recent_sentiment = np.mean(score_history[-5:]) if len(score_history) >= 5 else final_buy_score
+        positive_sentiment_days = len([s for s in score_history[-10:] if s > 5.0]) if len(score_history) >= 10 else (1 if final_buy_score > 5.0 else 0)
+        
+        # AGGRESSIVE CONDITIONS: Multiple ways to override choppy classification
+        if (recent_sentiment > 5.05 and final_buy_score > 5.02) or \
+           (positive_sentiment_days >= 6 and final_buy_score > 5.0) or \
+           (recent_sentiment > 5.0 and final_buy_score > 5.08):
+            print(f"SENTIMENT OVERRIDE: Positive sentiment ({recent_sentiment:.2f}, {positive_sentiment_days}/10 positive days) overrides {market_regime} → BULL behavior")
+            market_regime = "BULL"  # Override choppy classification with bull behavior
     
     # Get historical Final_Buy_Scores if available
     score_history = []
@@ -859,183 +1075,75 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         # Fallback: use current score repeated (not ideal but functional)
         score_history = [final_buy_score] * 10
     
-    # MOMENTUM REVERSAL DETECTION: Check for momentum reversals that could override regime
-    reversal_info = {'reversal_detected': False, 'type': None, 'strength': 0.0}
-    effective_market_regime = market_regime
+    # Calculate stable adaptive thresholds (clamped within ±10%)
+    buy_threshold, sell_threshold = calculate_adaptive_thresholds(score_history, market_regime, strategy=strategy)
     
-    if price_data is not None and len(score_history) >= 5:
-        reversal_info = detect_momentum_reversal(price_data, score_history)
-        
-        if reversal_info['reversal_detected'] and reversal_info['strength'] > 0.6:
-            # Strong reversal detected - override market regime
-            reversal_type = reversal_info['type']
-            strength = reversal_info['strength']
-            
-            if 'BULLISH' in reversal_type:
-                if market_regime in ["BEAR", "STRONG_BEAR", "SIDEWAYS"]:
-                    if 'ACCELERATION' in reversal_type:
-                        effective_market_regime = "STRONG_BULL"
-                        print(f"🔄 MOMENTUM REVERSAL: Strong bullish acceleration detected (strength: {strength:.1f}) - overriding {market_regime} → {effective_market_regime}")
-                    else:
-                        effective_market_regime = "BULL"
-                        print(f"🔄 MOMENTUM REVERSAL: Bullish reversal detected (strength: {strength:.1f}) - overriding {market_regime} → {effective_market_regime}")
-                elif market_regime == "BULL" and 'ACCELERATION' in reversal_type:
-                    effective_market_regime = "STRONG_BULL"
-                    print(f"� MOMENTUM REVERSAL: Bullish acceleration detected (strength: {strength:.1f}) - upgrading {market_regime} → {effective_market_regime}")
-                    
-            elif 'BEARISH' in reversal_type:
-                if market_regime in ["BULL", "STRONG_BULL", "SIDEWAYS"]:
-                    if 'ACCELERATION' in reversal_type:
-                        effective_market_regime = "STRONG_BEAR"
-                        print(f"🔄 MOMENTUM REVERSAL: Strong bearish acceleration detected (strength: {strength:.1f}) - overriding {market_regime} → {effective_market_regime}")
-                    else:
-                        effective_market_regime = "BEAR"
-                        print(f"🔄 MOMENTUM REVERSAL: Bearish reversal detected (strength: {strength:.1f}) - overriding {market_regime} → {effective_market_regime}")
-                elif market_regime == "BEAR" and 'ACCELERATION' in reversal_type:
-                    effective_market_regime = "STRONG_BEAR"
-                    print(f"🔄 MOMENTUM REVERSAL: Bearish acceleration detected (strength: {strength:.1f}) - upgrading {market_regime} → {effective_market_regime}")
+    # Get risk parameters (volatility affects position sizing only in bull regimes)
+    risk_params = get_adaptive_risk_params(market_regime, price_volatility, strategy=strategy)
     
-    # LEGACY MOMENTUM OVERRIDE: Upgrade market regime if strong momentum detected (kept for backward compatibility)
-    if len(score_history) >= 5 and not reversal_info['reversal_detected']:
-        recent_score_trend = np.mean(score_history[-3:]) - np.mean(score_history[-6:-3]) if len(score_history) >= 6 else 0
-        if recent_score_trend > 0.15 and final_buy_score > 5.1:
-            if market_regime == "SIDEWAYS":
-                effective_market_regime = "BULL"
-                print(f"MOMENTUM OVERRIDE: Upgrading {market_regime} → {effective_market_regime} (trend: +{recent_score_trend:.2f})")
-            elif market_regime == "BULL":
-                effective_market_regime = "STRONG_BULL"
-                print(f"MOMENTUM OVERRIDE: Upgrading {market_regime} → {effective_market_regime} (trend: +{recent_score_trend:.2f})")
+    # Calculate conviction score (no volatility penalties in bull regimes)
+    conviction_score = calculate_conviction_score(final_buy_score, score_history, market_regime)
     
-    # Calculate adaptive thresholds with effective regime and strategy
-    buy_threshold, sell_threshold = calculate_adaptive_thresholds(score_history, effective_market_regime, strategy=strategy)
+    # EXPOSURE PRESERVATION INVARIANT: Check if we're in a bull regime with positive sentiment
+    exposure_bias = risk_params.get('exposure_bias', False)
+    is_bull_regime = market_regime in ["BULL", "STRONG_BULL"]
     
-    # Get volatility-adjusted risk parameters with effective regime, strategy, and bull market duration
-    risk_params = get_adaptive_risk_params(effective_market_regime, price_volatility, strategy=strategy, bull_market_duration=bull_market_duration)
+    # Check sentiment alignment for exposure preservation
+    sentiment_positive = len(score_history) > 0 and np.mean(score_history[-5:]) > 5.0
     
-    # Enhanced decision logic with ultra-aggressive bull market optimizations
-    trend_following = risk_params.get('trend_following', False)
-    momentum_bias = risk_params.get('momentum_bias', 0.0)
-    conviction_multiplier = risk_params.get('conviction_multiplier', 1.0)
+    # DRAWDOWN ACCEPTANCE: In bull regimes with positive sentiment, accept drawdowns for participation
+    if is_bull_regime and sentiment_positive:
+        # Modify thresholds to maintain exposure - prevent premature exits
+        original_sell_threshold = sell_threshold
+        sell_threshold = min(sell_threshold, 4.3)  # Raise floor to prevent easy exits
+        if sell_threshold != original_sell_threshold:
+            print(f"EXPOSURE PRESERVATION: Adjusted sell threshold from {original_sell_threshold:.2f} to {sell_threshold:.2f} in {market_regime} with positive sentiment")
     
-    # Calculate conviction score for dynamic position sizing
-    conviction_score = calculate_conviction_score(final_buy_score, score_history, effective_market_regime)
-    
-    # Apply enhanced trend-following logic for bull markets with moderate scaling
-    if trend_following and effective_market_regime in ["BULL", "STRONG_BULL"]:
-        # In bull markets, be more aggressive about buying and holding
-        if effective_market_regime == "STRONG_BULL":
-            effective_buy_threshold = buy_threshold * 0.85  # 15% more aggressive
-            effective_sell_threshold = sell_threshold * 0.70  # 30% less likely to sell
-        else:  # BULL
-            effective_buy_threshold = buy_threshold * 0.90  # 10% more aggressive
-            effective_sell_threshold = sell_threshold * 0.80  # 20% less likely to sell
-        
-        # Moderate momentum persistence - if score is trending up, be more aggressive
-        if len(score_history) >= 3:
-            recent_trend = np.mean(score_history[-3:]) - np.mean(score_history[-6:-3]) if len(score_history) >= 6 else 0
-            if recent_trend > 0.01:  # Moderate threshold for positive momentum
-                if effective_market_regime == "STRONG_BULL":
-                    effective_buy_threshold *= 0.90  # More aggressive
-                    effective_sell_threshold *= 0.80  # Less likely to sell
-                else:
-                    effective_buy_threshold *= 0.95  # Slightly more aggressive
-                    effective_sell_threshold *= 0.85  # Slightly less likely to sell
-                    
-        # Momentum lock: If we've been in bull market for a while, lock in momentum
-        if effective_market_regime == "STRONG_BULL" and bull_market_duration > 60:
-            effective_buy_threshold = min(effective_buy_threshold, 4.5)  # Force buying at 4.5
-            effective_sell_threshold = min(effective_sell_threshold, 4.0)  # Reluctant to sell above 4.0
-        elif effective_market_regime == "BULL" and bull_market_duration > 90:
-            effective_buy_threshold = min(effective_buy_threshold, 4.7)  # Force buying at 4.7
-            effective_sell_threshold = min(effective_sell_threshold, 4.2)  # Reluctant to sell above 4.2
-                    
-        # Momentum reversal protection - if strong downward trend, be more cautious
-        if len(score_history) >= 5:
-            recent_decline = score_history[-1] - score_history[-5]
-            if recent_decline < -0.3:  # Moderate threshold for decline
-                effective_sell_threshold *= 1.15  # More likely to sell
-    else:
-        effective_buy_threshold = buy_threshold
-        effective_sell_threshold = sell_threshold
-    
-    # MOMENTUM REVERSAL ADJUSTMENTS: Fine-tune thresholds based on reversal signals
-    if reversal_info['reversal_detected']:
-        reversal_type = reversal_info['type']
-        strength = reversal_info['strength']
-        
-        if 'BULLISH' in reversal_type:
-            # Make buying more aggressive during bullish reversals
-            threshold_adjustment = 1.0 - (strength * 0.1)  # Up to 10% more aggressive
-            effective_buy_threshold *= threshold_adjustment
-            print(f"REVERSAL ADJUSTMENT: Making buy threshold {(1-threshold_adjustment)*100:.1f}% more aggressive due to {reversal_type}")
-            
-        elif 'BEARISH' in reversal_type:
-            # Make selling more aggressive during bearish reversals
-            threshold_adjustment = 1.0 + (strength * 0.1)  # Up to 10% more likely to sell
-            effective_sell_threshold *= threshold_adjustment
-            print(f"REVERSAL ADJUSTMENT: Making sell threshold {(threshold_adjustment-1)*100:.1f}% more aggressive due to {reversal_type}")
-    
-    # Determine recommendation with ULTRA-AGGRESSIVE logic and conviction scoring
-    if final_buy_score >= effective_buy_threshold:
+    # Enhanced decision logic with exposure preservation
+    if final_buy_score >= buy_threshold:
         recommendation = "BUY"
-        confidence = min(100, ((final_buy_score - effective_buy_threshold) / (10 - effective_buy_threshold)) * 100)
-        
-        # Moderate confidence boost in bull markets with conviction
-        if effective_market_regime == "STRONG_BULL":
-            confidence = min(100, confidence * 3.0 * conviction_score)  # Higher confidence
-        elif effective_market_regime == "BULL":
-            confidence = min(100, confidence * 2.5 * conviction_score)  # Higher confidence
-            
-        reasoning = f"Score {final_buy_score:.2f} exceeds {effective_market_regime} buy threshold {effective_buy_threshold:.3f}"
-        
-        if trend_following:
-            reasoning += f" (ultra-aggressive trend-following, conviction: {conviction_score:.1f}x)"
-        if reversal_info['reversal_detected']:
-            reasoning += f" (momentum reversal: {reversal_info['type']}, strength: {reversal_info['strength']:.1f})"
-            
-    elif final_buy_score <= effective_sell_threshold:
-        recommendation = "SELL"
-        confidence = min(100, ((effective_sell_threshold - final_buy_score) / effective_sell_threshold) * 100)
-        
-        # Apply conviction to sell signals too, but reduce in bull markets
-        if effective_market_regime in ["BULL", "STRONG_BULL"]:
-            confidence = min(100, confidence * conviction_score * 0.5)  # Reduce sell confidence in bull markets
+        confidence = min(100, ((final_buy_score - buy_threshold) / (10 - buy_threshold)) * 100)
+        reasoning = f"Score {final_buy_score:.2f} exceeds {market_regime} buy threshold {buy_threshold:.3f}"
+    elif final_buy_score <= sell_threshold:
+        # EXPOSURE PRESERVATION: In bull regimes, require stronger bearish evidence
+        if is_bull_regime and final_buy_score > 4.2:
+            recommendation = "HOLD"  # Resist selling in bull regimes unless very bearish
+            confidence = 30
+            reasoning = f"Score {final_buy_score:.2f} below sell threshold but exposure preservation prevents sell in {market_regime}"
         else:
-            confidence = min(100, confidence * conviction_score)
-        
-        reasoning = f"Score {final_buy_score:.2f} below {effective_market_regime} sell threshold {effective_sell_threshold:.3f}"
-        
-        if reversal_info['reversal_detected']:
-            reasoning += f" (momentum reversal: {reversal_info['type']}, strength: {reversal_info['strength']:.1f})"
+            recommendation = "SELL"
+            confidence = min(100, ((sell_threshold - final_buy_score) / sell_threshold) * 100)
+            reasoning = f"Score {final_buy_score:.2f} below {market_regime} sell threshold {sell_threshold:.3f}"
     else:
-        recommendation = "HOLD"
-        confidence = 100 - abs(final_buy_score - 5.0) * 20  # Closer to neutral = higher confidence
-        
-        # In bull markets, moderate bias toward HOLD instead of SELL
-        if effective_market_regime in ["BULL", "STRONG_BULL"] and final_buy_score > 4.0:
-            if effective_market_regime == "STRONG_BULL":
-                confidence = min(100, confidence * 2.5 * conviction_score)  # Higher confidence in holding
-            else:  # BULL
-                confidence = min(100, confidence * 2.0 * conviction_score)  # Higher confidence in holding
-            
-        reasoning = f"Score {final_buy_score:.2f} within {effective_market_regime} hold range ({effective_sell_threshold:.3f} - {effective_buy_threshold:.3f})"
-        
-        if reversal_info['reversal_detected']:
-            reasoning += f" (monitoring momentum reversal: {reversal_info['type']})"
+        # Neutral zone - apply exposure bias in bull regimes
+        if exposure_bias and final_buy_score >= 4.8:  # Lowered from 4.9 for earlier entry
+            recommendation = "BUY"  # Favor buying over holding in bull regimes when near neutral
+            confidence = 40
+            reasoning = f"Score {final_buy_score:.2f} in neutral zone but exposure bias favors buy in {market_regime}"
+        # ADDITIONAL EXPOSURE PRESERVATION: If sentiment is trending positive, favor holding over selling
+        elif len(score_history) >= 3 and np.mean(score_history[-3:]) > np.mean(score_history[-6:-3]) and final_buy_score > 4.7:
+            recommendation = "HOLD"  # Favor holding when sentiment is improving
+            confidence = 35
+            reasoning = f"Score {final_buy_score:.2f} in neutral zone with improving sentiment trend"
+        else:
+            recommendation = "HOLD"
+            confidence = 100 - abs(final_buy_score - 5.0) * 20  # Closer to neutral = higher confidence
+            reasoning = f"Score {final_buy_score:.2f} within {market_regime} hold range ({sell_threshold:.3f} - {buy_threshold:.3f})"
+    
+    # Apply conviction to confidence
+    confidence = min(100, confidence * conviction_score)
     
     return {
         'recommendation': recommendation,
         'confidence': max(0, min(100, confidence)),
-        'market_regime': effective_market_regime,  # Use effective regime
-        'original_regime': market_regime,  # Keep original for reference
-        'buy_threshold': effective_buy_threshold,
-        'sell_threshold': effective_sell_threshold,
+        'market_regime': market_regime,
+        'buy_threshold': buy_threshold,
+        'sell_threshold': sell_threshold,
         'reasoning': reasoning,
         'risk_params': risk_params,
         'final_buy_score': final_buy_score,
-        'trend_following': trend_following,
-        'momentum_bias': momentum_bias,
         'conviction_score': conviction_score,
         'position_size_multiplier': risk_params['position_size_multiplier'] * conviction_score,
-        'momentum_reversal': reversal_info  # Include reversal information
+        'exposure_bias_applied': exposure_bias and recommendation in ["BUY", "HOLD"],
+        'exposure_preserved': is_bull_regime and sentiment_positive and recommendation != "SELL"
     }

@@ -271,8 +271,13 @@ class AlpacaBacktester:
                 
             shares_to_buy = int(self.cash / price)
             if shares_to_buy > 0:
+                # Apply transaction costs (0.1% per trade to simulate bid-ask spread + fees)
+                transaction_cost_rate = 0.001  # 0.1%
                 cost = shares_to_buy * price
-                self.cash -= cost
+                transaction_cost = cost * transaction_cost_rate
+                total_cost = cost + transaction_cost
+                
+                self.cash -= total_cost
                 self.shares += shares_to_buy
                 self.entry_price = price  # Track entry price for risk management
                 
@@ -287,6 +292,8 @@ class AlpacaBacktester:
                     'Shares': shares_to_buy,
                     'Price': price,
                     'Cost': cost,
+                    'Transaction_Cost': transaction_cost,
+                    'Total_Cost': total_cost,
                     'Buy_Score': buy_score,
                     'Cash_After': self.cash,
                     'Shares_After': self.shares
@@ -295,46 +302,58 @@ class AlpacaBacktester:
                 print(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}) - Cash: ${self.cash:.2f}")
         
         elif action == "SELL" and self.shares > 0:
-            # Sell all shares
-            proceeds = self.shares * price
-            self.cash += proceeds
+            # Sell all shares with transaction costs
+            gross_proceeds = self.shares * price
+            transaction_cost_rate = 0.001  # 0.1%
+            transaction_cost = gross_proceeds * transaction_cost_rate
+            net_proceeds = gross_proceeds - transaction_cost
             
-            # Calculate P&L for this trade
+            self.cash += net_proceeds
+            
+            # Calculate P&L for this trade (including transaction costs from both buy and sell)
             if self.entry_price and self.entry_price > 0:
                 pnl_pct = ((price - self.entry_price) / self.entry_price) * 100
                 pnl_dollar = (price - self.entry_price) * self.shares
+                # Adjust for transaction costs
+                total_transaction_costs = transaction_cost + (self.shares * self.entry_price * transaction_cost_rate)
+                pnl_dollar_net = pnl_dollar - total_transaction_costs
+                pnl_pct_net = (pnl_dollar_net / (self.shares * self.entry_price)) * 100
             else:
-                pnl_pct = 0
-                pnl_dollar = 0
+                pnl_pct = pnl_pct_net = 0
+                pnl_dollar = pnl_dollar_net = 0
             
             self.trade_log.append({
                 'Date': date,
                 'Action': 'SELL',
                 'Shares': self.shares,
                 'Price': price,
-                'Proceeds': proceeds,
+                'Gross_Proceeds': gross_proceeds,
+                'Transaction_Cost': transaction_cost,
+                'Net_Proceeds': net_proceeds,
                 'Buy_Score': buy_score,
                 'Cash_After': self.cash,
                 'Shares_After': 0,
                 'PnL_Pct': pnl_pct,
-                'PnL_Dollar': pnl_dollar
+                'PnL_Dollar': pnl_dollar,
+                'PnL_Pct_Net': pnl_pct_net,
+                'PnL_Dollar_Net': pnl_dollar_net
             })
             
-            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}) - P&L: {pnl_pct:+.1f}% (${pnl_dollar:+.0f}) - Cash: ${self.cash:.2f}")
+            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
             self.shares = 0
             self.entry_price = None  # Reset entry price
     
     def detect_market_regime(self, price_data: pd.DataFrame, lookback_days: int = 60) -> str:
         """
-        Detect current market regime using shared logic
+        Detect current market regime using shared logic with transition smoothing
         """
         import sys
         import os
         src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
         sys.path.insert(0, src_path)
         
-        from logic import detect_market_regime
-        return detect_market_regime(price_data=price_data, lookback_days=lookback_days)
+        from logic import get_stable_market_regime
+        return get_stable_market_regime(price_data=price_data, lookback_days=lookback_days)
     
     def get_adaptive_risk_params(self, market_regime: str) -> Dict:
         """
@@ -506,8 +525,13 @@ class AlpacaBacktester:
             shares_to_buy = min(adjusted_shares, base_shares)  # Don't exceed available cash
             
             if shares_to_buy > 0:
+                # Apply transaction costs (0.1% per trade)
+                transaction_cost_rate = 0.001  # 0.1%
                 cost = shares_to_buy * price
-                self.cash -= cost
+                transaction_cost = cost * transaction_cost_rate
+                total_cost = cost + transaction_cost
+                
+                self.cash -= total_cost
                 self.shares += shares_to_buy
                 self.entry_price = price  # Track entry price for risk management
                 self.last_buy_date = date  # Track buy date for minimum holding period
@@ -523,6 +547,8 @@ class AlpacaBacktester:
                     'Shares': shares_to_buy,
                     'Price': price,
                     'Cost': cost,
+                    'Transaction_Cost': transaction_cost,
+                    'Total_Cost': total_cost,
                     'Buy_Score': buy_score,
                     'Market_Regime': market_regime,
                     'Position_Multiplier': base_position_multiplier,
@@ -539,37 +565,49 @@ class AlpacaBacktester:
                 print(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}, Conviction: {conviction_score:.1f}x) - Cash: ${self.cash:.2f}")
         
         elif action == "SELL" and self.shares > 0:
-            # Sell all shares
-            proceeds = self.shares * price
-            self.cash += proceeds
+            # Sell all shares with transaction costs
+            gross_proceeds = self.shares * price
+            transaction_cost_rate = 0.001  # 0.1%
+            transaction_cost = gross_proceeds * transaction_cost_rate
+            net_proceeds = gross_proceeds - transaction_cost
             
-            # Calculate P&L for this trade
+            self.cash += net_proceeds
+            
+            # Calculate P&L for this trade (including transaction costs from both buy and sell)
             if self.entry_price and self.entry_price > 0:
                 pnl_pct = ((price - self.entry_price) / self.entry_price) * 100
                 pnl_dollar = (price - self.entry_price) * self.shares
+                # Adjust for transaction costs
+                total_transaction_costs = transaction_cost + (self.shares * self.entry_price * transaction_cost_rate)
+                pnl_dollar_net = pnl_dollar - total_transaction_costs
+                pnl_pct_net = (pnl_dollar_net / (self.shares * self.entry_price)) * 100
             else:
-                pnl_pct = 0
-                pnl_dollar = 0
+                pnl_pct = pnl_pct_net = 0
+                pnl_dollar = pnl_dollar_net = 0
             
             self.trade_log.append({
                 'Date': date,
                 'Action': 'SELL',
                 'Shares': self.shares,
                 'Price': price,
-                'Proceeds': proceeds,
+                'Gross_Proceeds': gross_proceeds,
+                'Transaction_Cost': transaction_cost,
+                'Net_Proceeds': net_proceeds,
                 'Buy_Score': buy_score,
                 'Market_Regime': market_regime,
                 'Cash_After': self.cash,
                 'Shares_After': 0,
                 'PnL_Pct': pnl_pct,
-                'PnL_Dollar': pnl_dollar
+                'PnL_Dollar': pnl_dollar,
+                'PnL_Pct_Net': pnl_pct_net,
+                'PnL_Dollar_Net': pnl_dollar_net
             })
             
             # Track trade for overtrading protection
             self.recent_trades.append(date)
             self.last_trade_date = date
             
-            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}) - P&L: {pnl_pct:+.1f}% (${pnl_dollar:+.0f}) - Cash: ${self.cash:.2f}")
+            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
             self.shares = 0
             self.entry_price = None  # Reset entry price
     
