@@ -2,6 +2,7 @@
 """
 Orthrus Random Batch Backtesting
 Randomly selects from pools of tickers, strategies, and date ranges for comprehensive testing
+Features parallel execution with configurable threading for faster batch processing
 """
 
 import subprocess
@@ -10,6 +11,8 @@ import os
 import random
 import argparse
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 def get_random_date_range():
     """
@@ -82,15 +85,16 @@ def select_random_parameters():
     
     return ticker, strategy, start_date, end_date, description, category
 
-def run_backtest(ticker, strategy, start_date, end_date, description=""):
+def run_backtest(ticker, strategy, start_date, end_date, description="", print_header=True):
     """Run a single backtest and capture results"""
     cmd = ['python3', 'backtester/run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
     
-    print(f"\n{'='*80}")
-    print(f"TEST: {ticker} {strategy.upper()} | {start_date} to {end_date}")
-    if description:
-        print(f"{description}")
-    print('='*80)
+    if print_header:
+        print(f"\n{'='*80}")
+        print(f"TEST: {ticker} {strategy.upper()} | {start_date} to {end_date}")
+        if description:
+            print(f"{description}")
+        print('='*80)
     
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout
@@ -140,13 +144,15 @@ def run_backtest(ticker, strategy, start_date, end_date, description=""):
         return {'success': False, 'ticker': ticker, 'strategy': strategy.upper(), 'error': str(e)}
 
 def main():
-    """Run random batch tests"""
+    """Run random batch tests with threading support"""
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Orthrus Random Batch Backtesting')
     parser.add_argument('num_tests', type=int, nargs='?', default=10, 
                        help='Number of random backtests to run (default: 10)')
     parser.add_argument('--seed', type=int, help='Random seed for reproducible results')
+    parser.add_argument('--threads', type=int, default=4, 
+                       help='Number of concurrent threads (default: 4)')
     
     args = parser.parse_args()
     
@@ -157,31 +163,79 @@ def main():
     
     print("ORTHRUS RANDOM BATCH BACKTESTING")
     print(f"Running {args.num_tests} random backtests across diverse market conditions")
+    print(f"Using {args.threads} concurrent threads for parallel execution")
     print("=" * 80)
+    
+    # Generate all test parameters upfront for thread safety
+    test_params = []
+    for i in range(args.num_tests):
+        ticker, strategy, start_date, end_date, description, category = select_random_parameters()
+        test_params.append((i+1, ticker, strategy, start_date, end_date, description, category))
     
     results = []
     successful = 0
+    completed = 0
     
-    # Generate and run random tests
-    for i in range(args.num_tests):
-        print(f"\n[TEST {i+1}/{args.num_tests}]")
+    # Thread-safe print lock
+    print_lock = threading.Lock()
+    
+    def run_test_with_progress(params):
+        """Wrapper function to run test with progress tracking"""
+        nonlocal completed, successful
         
-        # Generate random parameters
-        ticker, strategy, start_date, end_date, description, category = select_random_parameters()
+        test_num, ticker, strategy, start_date, end_date, description, category = params
         
-        # Run the backtest
-        result = run_backtest(ticker, strategy, start_date, end_date, description)
+        with print_lock:
+            print(f"\n[TEST {test_num}/{args.num_tests}] Starting: {ticker} {strategy.upper()}")
+            print(f"{'='*80}")
+            print(f"TEST: {ticker} {strategy.upper()} | {start_date} to {end_date}")
+            if description:
+                print(f"{description}")
+            print('='*80)
+        
+        # Run the backtest without printing header (we already printed it above)
+        result = run_backtest(ticker, strategy, start_date, end_date, description, print_header=False)
         result['category'] = category  # Add category for analysis
-        results.append(result)
+        result['test_num'] = test_num
         
-        if result['success']:
-            successful += 1
-            # Show quick result
-            alpha = result.get('alpha', 'N/A')
-            trades = result.get('trades', 'N/A')
-            print(f"✅ Result: {alpha} alpha, {trades} trades")
-        else:
-            print(f"❌ Failed: {result.get('error', 'Unknown error')}")
+        with print_lock:
+            completed += 1
+            if result['success']:
+                successful += 1
+                # Show quick result
+                alpha = result.get('alpha', 'N/A')
+                trades = result.get('trades', 'N/A')
+                print(f"✅ [{test_num}/{args.num_tests}] {ticker}: {alpha} alpha, {trades} trades ({completed}/{args.num_tests} complete)")
+            else:
+                print(f"❌ [{test_num}/{args.num_tests}] {ticker}: Failed - {result.get('error', 'Unknown error')} ({completed}/{args.num_tests} complete)")
+        
+        return result
+    
+    # Execute tests in parallel using ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=args.threads) as executor:
+        # Submit all jobs
+        future_to_params = {executor.submit(run_test_with_progress, params): params for params in test_params}
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_params):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                params = future_to_params[future]
+                test_num, ticker, strategy = params[0], params[1], params[2]
+                with print_lock:
+                    print(f"❌ [{test_num}/{args.num_tests}] {ticker}: Exception - {str(e)}")
+                results.append({
+                    'success': False, 
+                    'ticker': ticker, 
+                    'strategy': strategy.upper(), 
+                    'error': str(e),
+                    'test_num': test_num
+                })
+    
+    # Sort results by test number for consistent output
+    results.sort(key=lambda x: x.get('test_num', 0))
     
     # Print comprehensive summary
     print(f"\n{'='*80}")
@@ -253,6 +307,7 @@ def main():
     
     print(f"\n{'='*80}")
     print("TIP: Run with --seed <number> for reproducible results")
+    print("TIP: Use --threads <number> to control parallel execution (default: 4)")
     print("TIP: Increase number of tests for more comprehensive analysis")
     
     return 0 if successful > 0 else 1
