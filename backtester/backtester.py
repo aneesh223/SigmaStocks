@@ -655,7 +655,7 @@ class AlpacaBacktester:
         
         print(f"Simulating {len(trading_days)} trading days...")
         
-        # OPTIMIZATION: Analyze ALL news articles ONCE and calculate ALL scores ONCE
+        # SENTIMENT ANALYSIS: Analyze all news articles once for efficiency
         print(f"🧠 Analyzing all {len(self.full_news_data)} news articles (one-time processing)...")
         try:
             # Analyze all news at once to get complete sentiment DataFrame
@@ -664,38 +664,6 @@ class AlpacaBacktester:
         except Exception as e:
             print(f"Error in sentiment analysis: {e}")
             full_sentiment_df = pd.DataFrame()
-        
-        if full_sentiment_df.empty:
-            print("No sentiment data available, using neutral scores")
-            # Create a simple lookup with neutral scores for all trading days
-            score_lookup = {date: 5.0 for date in trading_days}
-        else:
-            # PRE-CALCULATE ALL Final_Buy_Scores using the complete dataset
-            print(f"🔢 Pre-calculating all Final_Buy_Scores for entire period...")
-            
-            # Calculate verdict using the FULL sentiment and price data
-            verdict = market.calculate_verdict(
-                ticker=self.ticker,
-                sentiment_df=full_sentiment_df,
-                strategy=self.strategy,
-                lookback_days=lookback_days,
-                custom_date=end_date,  # Use end date as reference
-                price_data=self.full_price_data  # Use full price data
-            )
-            
-            # Extract all Final_Buy_Scores and create a lookup dictionary
-            final_buy_scores_over_time = verdict.get('Final_Buy_Scores_Over_Time', [])
-            score_lookup = {}
-            
-            for timestamp, score in final_buy_scores_over_time:
-                # Create lookup by date for fast access
-                if hasattr(timestamp, 'date'):
-                    date_key = timestamp.date()
-                else:
-                    date_key = timestamp
-                score_lookup[date_key] = score
-            
-            print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
         
         print()
         
@@ -708,11 +676,35 @@ class AlpacaBacktester:
         print(f"Initial Adaptive Parameters: Stop-loss: {risk_params['stop_loss_pct']*100:.0f}%, Take-profit: {risk_params['take_profit_pct']*100:.0f}%, Position size: {risk_params['position_size_multiplier']:.1f}x")
         print()
         
-        # Simulation loop - now extremely fast since everything is pre-calculated
+        # Simulation loop - calculate scores dynamically to avoid look-ahead bias
         score_history = []  # Track scores for dynamic thresholds and momentum reversal detection
         regime_update_counter = 0  # Track how often we update regime
         
+        # OPTIMIZED APPROACH: Pre-filter sentiment data by date ranges to avoid look-ahead bias
+        # This is much faster than recalculating sentiment analysis for each day
+        print("🔢 Pre-processing sentiment data by date ranges (avoiding look-ahead bias)...")
+        
+        # Create sentiment lookup that respects temporal boundaries
+        sentiment_by_date = {}
+        if not full_sentiment_df.empty:
+            # Group sentiment data by date for efficient lookup
+            for timestamp, row in full_sentiment_df.iterrows():
+                date_key = timestamp.date() if hasattr(timestamp, 'date') else timestamp
+                sentiment_by_date[date_key] = row['Compound_Score']
+        
+        print(f"Processed {len(sentiment_by_date)} sentiment records by date")
+        print()
+        
+        # Progress tracking for long simulations
+        total_days = len(trading_days)
+        progress_interval = max(1, total_days // 20)  # Show progress every 5%
+        
         for i, simulation_date in enumerate(trading_days):
+            # Progress indicator for long simulations
+            if i % progress_interval == 0 or i == total_days - 1:
+                progress_pct = (i + 1) / total_days * 100
+                print(f"Progress: {i+1}/{total_days} days ({progress_pct:.1f}%)")
+            
             try:
                 # Safe DataFrame access with error handling
                 try:
@@ -725,20 +717,76 @@ class AlpacaBacktester:
                     print(f"Warning: Invalid price {current_price} for {simulation_date.date()}, skipping...")
                     continue
                 
-                # FAST LOOKUP: Get pre-calculated Final_Buy_Score for this date
-                sim_date_key = simulation_date.date() if hasattr(simulation_date, 'date') else simulation_date
+                # OPTIMIZED DYNAMIC SCORE CALCULATION: Avoid look-ahead bias with efficient computation
+                # Calculate Final_Buy_Score using only data available up to current simulation date
                 
-                # Look for exact match first
-                if sim_date_key in score_lookup:
-                    buy_score_t = score_lookup[sim_date_key]
+                if full_sentiment_df.empty:
+                    buy_score_t = 5.0  # Neutral score if no sentiment data
                 else:
-                    # Find the most recent score on or before this date
-                    valid_dates = [d for d in score_lookup.keys() if d <= sim_date_key]
-                    if valid_dates:
-                        most_recent_date = max(valid_dates)
-                        buy_score_t = score_lookup[most_recent_date]
+                    # Get sentiment data up to current date (no look-ahead bias)
+                    current_date = simulation_date.date() if hasattr(simulation_date, 'date') else simulation_date
+                    
+                    # Find most recent sentiment score on or before current date
+                    available_dates = [d for d in sentiment_by_date.keys() if d <= current_date]
+                    
+                    if available_dates:
+                        # Use most recent sentiment score
+                        most_recent_date = max(available_dates)
+                        sentiment_score = sentiment_by_date[most_recent_date]
+                        sentiment_health = (sentiment_score + 1) * 5  # Convert to 0-10 scale
+                        
+                        # Get technical score using only price data up to current date (no look-ahead bias)
+                        price_data_up_to_date = self.full_price_data.loc[:simulation_date]
+                        
+                        if len(price_data_up_to_date) >= 50:  # Need minimum data for technical analysis
+                            try:
+                                # Import technical analysis functions
+                                import sys
+                                import os
+                                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
+                                sys.path.insert(0, src_path)
+                                
+                                if self.strategy.lower() == "momentum":
+                                    from market import calculate_golden_death_cross, calculate_macd, calculate_rsi, calculate_momentum_score_cached
+                                    
+                                    prices = price_data_up_to_date['Close']
+                                    
+                                    if len(prices) >= 200:  # Golden/Death Cross needs 200 days
+                                        cross_score, golden_cross, death_cross, sma_short, sma_long = calculate_golden_death_cross(prices)
+                                        macd_line, signal_line, histogram, bullish_crossover = calculate_macd(prices)
+                                        rsi = calculate_rsi(prices)
+                                        technical_score, _ = calculate_momentum_score_cached(
+                                            macd_line, signal_line, histogram, bullish_crossover, rsi, cross_score, golden_cross, death_cross
+                                        )
+                                    elif len(prices) >= 26:  # MACD needs 26 days
+                                        macd_line, signal_line, histogram, bullish_crossover = calculate_macd(prices)
+                                        rsi = calculate_rsi(prices)
+                                        technical_score, _ = calculate_momentum_score_cached(
+                                            macd_line, signal_line, histogram, bullish_crossover, rsi, 0.0, False, False
+                                        )
+                                    else:
+                                        technical_score = 5.0  # Neutral if insufficient data
+                                else:
+                                    # Value strategy - use Z-score
+                                    from market import calculate_z_score, calculate_value_score
+                                    
+                                    prices = price_data_up_to_date['Close']
+                                    z_score = calculate_z_score(prices, window=50)
+                                    technical_score, _ = calculate_value_score(z_score)
+                                
+                                # Calculate Final_Buy_Score (same formula as market.py)
+                                sentiment_penalty = 0.5 if sentiment_score < -0.5 else 1.0
+                                buy_score_t = ((technical_score * 0.6) + (sentiment_health * 0.4)) * sentiment_penalty
+                                buy_score_t = max(1.0, min(buy_score_t, 10.0))  # Clamp to 1-10 range
+                                
+                            except Exception as e:
+                                print(f"Warning: Technical analysis failed for {current_date}: {e}")
+                                buy_score_t = 5.0  # Neutral fallback
+                        else:
+                            # Insufficient price data - use sentiment only
+                            buy_score_t = sentiment_health
                     else:
-                        buy_score_t = 5.0  # Neutral fallback
+                        buy_score_t = 5.0  # Neutral if no sentiment data available
                 
                 # Add to score history for dynamic thresholds and momentum reversal detection
                 score_history.append(buy_score_t)
