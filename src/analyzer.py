@@ -1,12 +1,13 @@
-# Memory-optimized imports - only import what we need
 import pandas as pd
 import numpy as np
 from functools import lru_cache
 import re
 import warnings
+import logging
+
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# Global caches for ultra-fast performance
+# Global caches
 _sentiment_cache = {}
 _batch_cache = {}
 _cache_hits = 0
@@ -26,36 +27,34 @@ _ai_model = None
 _ai_tokenizer = None
 
 def _ensure_model():
-    """Lazy load DistilRoBERTa model and tokenizer only when needed"""
+    """Lazy load DistilRoBERTa model and tokenizer"""
     global _ai_model, _ai_tokenizer
     if _ai_model is None:
         try:
             from transformers import AutoTokenizer, AutoModelForSequenceClassification
             import torch
             
-            print("Loading DistilRoBERTa financial sentiment model (first time only)...")
+            logging.info("Loading DistilRoBERTa financial sentiment model...")
             model_name = "mrm8488/distilroberta-finetuned-financial-news-sentiment-analysis"
             _ai_tokenizer = AutoTokenizer.from_pretrained(model_name)
             _ai_model = AutoModelForSequenceClassification.from_pretrained(model_name)
             
-            # Check for GPU availability and move model
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             if device.type == "cuda":
                 _ai_model = _ai_model.to(device)
-                print(f"DistilRoBERTa loaded on GPU: {torch.cuda.get_device_name(0)}")
+                logging.info(f"DistilRoBERTa loaded on GPU: {torch.cuda.get_device_name(0)}")
             else:
-                print("DistilRoBERTa loaded on CPU")
+                logging.info("DistilRoBERTa loaded on CPU")
             
-            # Set to evaluation mode for inference
             _ai_model.eval()
             
         except Exception as e:
-            print(f"Error loading DistilRoBERTa model: {e}")
-            print("Falling back to VADER-only analysis...")
+            logging.error(f"Error loading DistilRoBERTa model: {e}")
+            logging.info("Falling back to VADER-only analysis...")
             return False
     return True
 
-# Pre-compiled regex patterns for better performance
+# Pre-compiled regex patterns
 _SOURCE_TAG_PATTERNS = [
     re.compile(r'^\[.*?\]\s*'),      # Remove from start
     re.compile(r'\s*\[.*?\]$'),      # Remove from end  
@@ -79,15 +78,14 @@ FINANCIAL_LEXICON = {
 def _update_vader_lexicon():
     """Update VADER's lexicon with financial terms"""
     if VADER_AVAILABLE:
-        # Update VADER's lexicon with our financial terms
         _vader_analyzer.lexicon.update(FINANCIAL_LEXICON)
-        print("VADER enhanced with financial lexicon")
+        logging.info("VADER enhanced with financial lexicon")
 
 # Initialize enhanced VADER
 if VADER_AVAILABLE:
     _update_vader_lexicon()
 
-# Memory-efficient source categorization using numpy arrays
+# Source categorization using numpy arrays
 _PRIMARY_SOURCES_ARRAY = np.array(['SEC EDGAR', 'SEC', 'U.S. Securities and Exchange Commission', 
                                   'Company Investor Relations', 'Investor Relations'])
 _INSTITUTIONAL_SOURCES_ARRAY = np.array(['Bloomberg', 'Reuters', 'The Wall Street Journal', 'Financial Times', 
@@ -97,13 +95,13 @@ _ENTERTAINMENT_SOURCES_ARRAY = np.array(['The Motley Fool', 'CNBC', 'CNN Busines
                                         'USA Today', 'Forbes', 'Fortune', 'Business Insider', 'Reddit',
                                         'Twitter', 'StockTwits', 'Robinhood Snacks', 'TheStreet'])
 
-# Convert to frozensets for O(1) lookup performance
+# Convert to frozensets for O(1) lookup
 PRIMARY_SOURCES = frozenset(_PRIMARY_SOURCES_ARRAY)
 INSTITUTIONAL_SOURCES = frozenset(_INSTITUTIONAL_SOURCES_ARRAY)
 DATA_AGGREGATORS = frozenset(_DATA_AGGREGATORS_ARRAY)
 ENTERTAINMENT_SOURCES = frozenset(_ENTERTAINMENT_SOURCES_ARRAY)
 
-# Memory-optimized source weights using numpy for faster lookups
+# Source weights using numpy for faster lookups
 _SOURCE_WEIGHT_KEYS = np.array(list(PRIMARY_SOURCES) + list(INSTITUTIONAL_SOURCES) + list(DATA_AGGREGATORS) + list(ENTERTAINMENT_SOURCES))
 _SOURCE_WEIGHT_VALUES = np.array([2.0] * len(PRIMARY_SOURCES) + 
                                 [1.8, 1.8, 1.8, 1.8, 1.7, 1.6, 1.6] +  # Institutional weights
@@ -239,17 +237,16 @@ def get_hybrid_sentiment(text, ticker=""):
     
     return result
 
-def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased batch size for better GPU utilization
-    """Ultra-optimized batch processing with advanced caching and memory management"""
+def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):
+    """Batch processing with caching and memory management"""
     global _cache_hits, _cache_misses, _batch_cache
     
     vader_analyzer, ai_model, ai_tokenizer = get_hybrid_analyzers()
     
     if ai_model is None or ai_tokenizer is None:
-        # Fallback to VADER-only batch processing
         return get_vader_sentiment_batch(texts)
     
-    # Check batch cache first - include ticker in cache key
+    # Check batch cache
     batch_cache_key = hash((ticker, tuple(texts)))
     if batch_cache_key in _batch_cache:
         _cache_hits += len(texts)
@@ -258,23 +255,20 @@ def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased ba
     try:
         import torch
         
-        # Check for GPU and move model if available
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if device.type == "cuda":
             ai_model = ai_model.to(device)
-            print(f"Using GPU acceleration for hybrid analysis: {torch.cuda.get_device_name(0)}")
+            logging.info(f"Using GPU acceleration: {torch.cuda.get_device_name(0)}")
         else:
-            print("Using CPU processing for hybrid analysis")
+            logging.info("Using CPU processing")
         
         results = []
         
-        # ULTRA-FAST VADER PROCESSING: Vectorized approach
+        # VADER processing
         vader_scores = []
         if vader_analyzer is not None:
-            # Pre-clean all texts at once
             cleaned_texts = [clean_headline(text) for text in texts]
             
-            # Vectorized VADER processing
             for cleaned_text in cleaned_texts:
                 try:
                     scores = vader_analyzer.polarity_scores(cleaned_text)
@@ -284,23 +278,19 @@ def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased ba
         else:
             vader_scores = [get_simple_sentiment(text) for text in texts]
         
-        # ULTRA-OPTIMIZED DISTILROBERTA PROCESSING: Larger batches with memory management
+        # DistilRoBERTa processing
         for i in range(0, len(texts), batch_size):
             batch_texts = texts[i:i + batch_size]
             batch_vader_scores = vader_scores[i:i + batch_size]
             
-            # Clean batch texts
             cleaned_batch = [clean_headline(text) for text in batch_texts]
             
-            # Tokenize batch with optimized settings
             inputs = ai_tokenizer(cleaned_batch, return_tensors="pt", truncation=True, 
-                                 padding=True, max_length=256)  # Reduced max_length for speed
+                                 padding=True, max_length=256)
             
-            # Move batch to GPU if available
             inputs = {k: v.to(device) for k, v in inputs.items()}
             
             with torch.no_grad():
-                # Use mixed precision for faster inference if available
                 if device.type == "cuda" and hasattr(torch, 'autocast'):
                     with torch.autocast(device_type='cuda'):
                         outputs = ai_model(**inputs)
@@ -309,15 +299,12 @@ def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased ba
                     outputs = ai_model(**inputs)
                     predictions = torch.nn.functional.softmax(outputs.logits, dim=-1)
             
-            # VECTORIZED HYBRID LOGIC: Process entire batch at once
-            # Convert to numpy for faster processing
+            # Vectorized hybrid logic
             predictions_np = predictions.cpu().numpy()
             
-            # Vectorized classification determination
             max_indices = np.argmax(predictions_np, axis=1)
             max_confidences = np.max(predictions_np, axis=1)
             
-            # Vectorized hybrid scoring
             for j in range(len(batch_texts)):
                 vader_score = batch_vader_scores[j]
                 ai_confidence = max_confidences[j]
@@ -342,23 +329,21 @@ def get_hybrid_sentiment_batch(texts, ticker="", batch_size=32):  # Increased ba
                 
                 results.append(hybrid_score)
             
-            # Clear GPU memory after each batch
             if device.type == "cuda":
                 torch.cuda.empty_cache()
         
-        # Cache the batch result
         _batch_cache[batch_cache_key] = results
         _cache_misses += len(texts)
         
         return results
         
     except Exception as e:
-        print(f"Hybrid batch error: {e}")
+        logging.error(f"Hybrid batch error: {e}")
         return get_vader_sentiment_batch(texts)
 
 @lru_cache(maxsize=1000)
 def remove_source_tags(headline):
-    """Remove source tags like [benzinga], [reuters] from headlines - optimized with pre-compiled regex"""
+    """Remove source tags like [benzinga], [reuters] from headlines"""
     if not headline:
         return headline
     
@@ -374,17 +359,15 @@ def remove_source_tags(headline):
     return cleaned.strip()
 
 def get_vader_sentiment_batch(texts, batch_size=None):
-    """Batch process multiple texts using VADER only (fallback)"""
+    """Batch process multiple texts using VADER only"""
     analyzer = get_vader_analyzer()
     
     if analyzer is None:
-        # Fallback to simple rule-based sentiment
         return [get_simple_sentiment(text) for text in texts]
     
     try:
         results = []
         
-        # VADER is fast enough to process individually
         for text in texts:
             cleaned_text = clean_headline(text)
             scores = analyzer.polarity_scores(cleaned_text)
@@ -393,7 +376,7 @@ def get_vader_sentiment_batch(texts, batch_size=None):
         return results
         
     except Exception as e:
-        print(f"VADER batch error: {e}")
+        logging.error(f"VADER batch error: {e}")
         return [get_simple_sentiment(text) for text in texts]
 
 @lru_cache(maxsize=1000)
@@ -416,7 +399,7 @@ def get_simple_sentiment(text):
 
 @lru_cache(maxsize=1000)
 def clean_headline(text):
-    """Optimized headline cleaning with caching - enhanced for VADER"""
+    """Headline cleaning with financial phrase replacements"""
     if not text:
         return text
         
@@ -433,7 +416,7 @@ def clean_headline(text):
         'top pick': 'best stock', 'buy rating': 'strong buy', 'strong buy': 'excellent',
         'outperform': 'winner', 'stock to buy': 'good investment',
         
-        # CONTEXT-AWARE FIXES: Handle contrarian/bullish statements
+        # Context-aware fixes: Handle contrarian/bullish statements
         'saying it would miss': 'predicting decline but wrong',  # Cramer-style contrarian
         'would miss': 'expected to decline',
         'has it wrong': 'incorrect bearish prediction',
@@ -452,7 +435,7 @@ def clean_headline(text):
 
 @lru_cache(maxsize=1000)
 def validate_target(headline, ticker, raw_score):
-    """Optimized target validation with caching"""
+    """Target validation with caching"""
     headline_lower = headline.lower()
     ticker_lower = ticker.lower()
     
@@ -461,7 +444,6 @@ def validate_target(headline, ticker, raw_score):
         if len(parts) > 1:
             target = parts[1].split()[0].strip(".,;:!?")
             
-            # Use frozenset for O(1) lookup
             generics = frozenset(['investors', 'shareholders', 'holders', 'stock', 'market', 
                                 'trading', 'tech', 'semis', 'sector', 'growth', 'economy'])
             
@@ -472,7 +454,7 @@ def validate_target(headline, ticker, raw_score):
 
 @lru_cache(maxsize=500)
 def categorize_source(source):
-    """Optimized source categorization with O(1) lookups and case-insensitive matching"""
+    """Source categorization with case-insensitive matching"""
     # Convert to title case for consistent matching
     source_title = source.title()
     
@@ -497,23 +479,23 @@ def categorize_source(source):
             return 'entertainment'
 
 def get_sentiment(parsed_data, ticker, timeframe_days=30):
-    """Ultra-optimized sentiment analysis with hybrid VADER + DistilRoBERTa approach and advanced caching"""
+    """Sentiment analysis with hybrid VADER + DistilRoBERTa approach and caching"""
     global _cache_hits, _cache_misses
     
     if not parsed_data:
         return pd.DataFrame()
 
-    # Create DataFrame with optimized dtypes for memory efficiency
+    # Create DataFrame with optimized dtypes
     df = pd.DataFrame(parsed_data, columns=['Timestamp', 'Headline', 'Source'])
     
     if df.empty:
         return pd.DataFrame()
     
-    # Convert timestamps to datetime if needed (vectorized)
+    # Convert timestamps to datetime if needed
     if not pd.api.types.is_datetime64_any_dtype(df['Timestamp']):
         df['Timestamp'] = pd.to_datetime(df['Timestamp'], utc=True)
     
-    # Optimize memory usage by using categorical data types for repeated strings
+    # Optimize memory usage by using categorical data types
     df['Source'] = df['Source'].astype('category')
     
     # Get cached hybrid analyzers
@@ -522,8 +504,7 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     # Vectorized headline cleaning with caching
     df['Cleaned_Headline'] = df['Headline'].apply(clean_headline)
     
-    # Print simple summary with cache statistics
-    print(f"Analyzing {len(df)} news articles... (Cache hits: {_cache_hits}, misses: {_cache_misses})")
+    logging.info(f"Analyzing {len(df)} news articles... (Cache hits: {_cache_hits}, misses: {_cache_misses})")
     
     # Add progress bar for sentiment analysis
     try:
@@ -532,27 +513,26 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     except ImportError:
         use_progress_bar = False
     
-    # ULTRA-OPTIMIZED HYBRID SENTIMENT ANALYSIS with larger batches
+    # Hybrid sentiment analysis with larger batches
     if ai_model is not None and ai_tokenizer is not None and vader_analyzer is not None:
-        print("Using ultra-optimized hybrid VADER + DistilRoBERTa analysis...")
+        logging.info("Using hybrid VADER + DistilRoBERTa analysis...")
         
-        # Use larger batch processing for optimal GPU utilization
         headlines_list = df['Cleaned_Headline'].tolist()
         
         if use_progress_bar:
-            print("Processing headlines with optimized hybrid approach...")
-            raw_scores = get_hybrid_sentiment_batch(headlines_list, ticker, batch_size=64)  # Larger batches
+            logging.info("Processing headlines with hybrid approach...")
+            raw_scores = get_hybrid_sentiment_batch(headlines_list, ticker, batch_size=64)
         else:
             raw_scores = get_hybrid_sentiment_batch(headlines_list, ticker, batch_size=64)
             
-        raw_scores = np.array(raw_scores, dtype=np.float32)  # Use float32 for memory efficiency
+        raw_scores = np.array(raw_scores, dtype=np.float32)
     elif vader_analyzer is not None:
-        print("Using VADER with enhanced financial lexicon...")
+        logging.info("Using VADER with enhanced financial lexicon...")
         headlines_list = df['Cleaned_Headline'].tolist()
         raw_scores = get_vader_sentiment_batch(headlines_list)
         raw_scores = np.array(raw_scores, dtype=np.float32)
     else:
-        print("Using fallback sentiment analysis...")
+        logging.info("Using fallback sentiment analysis...")
         if use_progress_bar:
             raw_scores = np.array([get_simple_sentiment(headline) 
                                  for headline in tqdm(df['Cleaned_Headline'], desc="Processing headlines")], dtype=np.float32)
@@ -561,12 +541,10 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     
     df['Raw_Score'] = raw_scores
     
-    # ULTRA-FAST VECTORIZED TARGET VALIDATION using numpy operations
-    # Pre-compile validation logic for maximum speed
+    # Vectorized target validation using numpy operations
     headlines_array = df['Headline'].values
     ticker_lower = ticker.lower()
     
-    # Vectorized validation using numpy where for ultra-fast processing
     valid_scores = np.zeros(len(headlines_array), dtype=np.float32)
     
     for i, (headline, raw_score) in enumerate(zip(headlines_array, raw_scores)):
@@ -577,7 +555,6 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
             if len(parts) > 1:
                 target = parts[1].split()[0].strip(".,;:!?")
                 
-                # Fast set lookup for generics
                 generics = {'investors', 'shareholders', 'holders', 'stock', 'market', 
                            'trading', 'tech', 'semis', 'sector', 'growth', 'economy'}
                 
@@ -592,25 +569,23 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
     
     df['Raw_Score'] = valid_scores
     
-    # ULTRA-OPTIMIZED SOURCE PROCESSING with vectorized operations
-    # Pre-compute all source categorizations and weights at once
+    # Source processing with vectorized operations
     source_categories = df['Source'].apply(categorize_source).astype('category')
     df['Source_Type'] = source_categories
     
-    # Vectorized weight calculation using numpy broadcasting
+    # Vectorized weight calculation
     source_weights = np.array([SOURCE_WEIGHTS.get(s.title(), SOURCE_WEIGHTS.get(s, 1.0)) 
                               for s in df['Source']], dtype=np.float32)
     df['Weight'] = source_weights
     df['Compound_Score'] = np.clip(df['Raw_Score'] * df['Weight'], -1.0, 1.0).astype('float32')
     
-    # MEMORY-OPTIMIZED TIME GROUPING
+    # Time grouping
     if timeframe_days <= 1:
         df['TimeGroup'] = df['Timestamp'].dt.floor('h')
     else:
         df['TimeGroup'] = df['Timestamp'].dt.date
     
-    # ULTRA-FAST AGGREGATION using optimized numpy operations
-    # Pre-compute masks for efficiency (avoid repeated boolean operations)
+    # Aggregation using numpy operations
     source_masks = {
         'primary': (source_categories == 'primary').values,
         'institutional': (source_categories == 'institutional').values, 
@@ -618,60 +593,58 @@ def get_sentiment(parsed_data, ticker, timeframe_days=30):
         'entertainment': (source_categories == 'entertainment').values
     }
     
-    # Optimized weighted mean function using pure numpy
-    def ultra_fast_weighted_mean(group):
+    def weighted_mean(group):
         weights = group['Weight'].values.astype(np.float32)
         scores = group['Compound_Score'].values.astype(np.float32)
         weight_sum = np.sum(weights)
         return np.sum(scores * weights) / weight_sum if weight_sum > 0 else 0.0
     
-    # Main aggregation with memory-optimized groupby operations
+    # Main aggregation
     result_df = df.groupby('TimeGroup', sort=False).agg({
         'Raw_Score': 'mean', 
         'Weight': 'mean'
-    }).astype(np.float32)  # Use float32 for memory efficiency
+    }).astype(np.float32)
     
-    # Calculate weighted compound scores using ultra-optimized function
+    # Calculate weighted compound scores
     try:
-        weighted_scores = df.groupby('TimeGroup', sort=False).apply(ultra_fast_weighted_mean, include_groups=False)
+        weighted_scores = df.groupby('TimeGroup', sort=False).apply(weighted_mean, include_groups=False)
     except TypeError:
-        weighted_scores = df.groupby('TimeGroup', sort=False).apply(ultra_fast_weighted_mean)
+        weighted_scores = df.groupby('TimeGroup', sort=False).apply(weighted_mean)
     
     result_df['Compound_Score'] = weighted_scores.astype(np.float32)
     
-    # ULTRA-EFFICIENT SENTIMENT AND COUNT CALCULATIONS using pre-computed masks
+    # Sentiment and count calculations using pre-computed masks
     for source_type, mask in source_masks.items():
-        if np.any(mask):  # Only process if there are articles of this type
+        if np.any(mask):
             source_df = df[mask]
             sentiment_col = f'{source_type.title()}_Sentiment'
             count_col = f'{source_type.title()}_Count'
             
             try:
-                sentiment_scores = source_df.groupby('TimeGroup', sort=False).apply(ultra_fast_weighted_mean, include_groups=False)
+                sentiment_scores = source_df.groupby('TimeGroup', sort=False).apply(weighted_mean, include_groups=False)
             except TypeError:
-                sentiment_scores = source_df.groupby('TimeGroup', sort=False).apply(ultra_fast_weighted_mean)
+                sentiment_scores = source_df.groupby('TimeGroup', sort=False).apply(weighted_mean)
             
             counts = source_df.groupby('TimeGroup', sort=False).size()
             
             result_df[sentiment_col] = sentiment_scores.reindex(result_df.index, fill_value=0).astype(np.float32)
-            result_df[count_col] = counts.reindex(result_df.index, fill_value=0).astype(np.int16)  # Use int16 for counts
+            result_df[count_col] = counts.reindex(result_df.index, fill_value=0).astype(np.int16)
         else:
-            # Set to zero if no articles of this type
             result_df[f'{source_type.title()}_Sentiment'] = np.float32(0)
             result_df[f'{source_type.title()}_Count'] = np.int16(0)
     
-    # MEMORY CLEANUP: Explicitly delete large intermediate objects
+    # Memory cleanup
     del df, headlines_array, raw_scores, valid_scores, source_weights, source_categories
     
-    # Print final cache statistics
+    # Print cache statistics
     hit_rate = _cache_hits / (_cache_hits + _cache_misses) * 100 if (_cache_hits + _cache_misses) > 0 else 0
-    print(f"Analysis complete with {hit_rate:.1f}% cache hit rate")
+    logging.info(f"Analysis complete with {hit_rate:.1f}% cache hit rate")
     
     return result_df
 
 @lru_cache(maxsize=1000)
 def get_top_headlines(parsed_data_tuple, ticker, timeframe_days=30):
-    """Optimized top headlines extraction with hybrid sentiment analysis"""
+    """Top headlines extraction with hybrid sentiment analysis"""
     if not parsed_data_tuple:
         return "N/A", "N/A"
 
@@ -744,14 +717,14 @@ def clear_sentiment_caches():
     total_requests = _cache_hits + _cache_misses
     hit_rate = (_cache_hits / total_requests * 100) if total_requests > 0 else 0
     
-    print(f"Clearing sentiment caches...")
-    print(f"   Cache Statistics:")
-    print(f"   - Total requests: {total_requests:,}")
-    print(f"   - Cache hits: {_cache_hits:,}")
-    print(f"   - Cache misses: {_cache_misses:,}")
-    print(f"   - Hit rate: {hit_rate:.1f}%")
-    print(f"   - Individual cache size: {len(_sentiment_cache):,}")
-    print(f"   - Batch cache size: {len(_batch_cache):,}")
+    logging.info(f"Clearing sentiment caches...")
+    logging.info(f"   Cache Statistics:")
+    logging.info(f"   - Total requests: {total_requests:,}")
+    logging.info(f"   - Cache hits: {_cache_hits:,}")
+    logging.info(f"   - Cache misses: {_cache_misses:,}")
+    logging.info(f"   - Hit rate: {hit_rate:.1f}%")
+    logging.info(f"   - Individual cache size: {len(_sentiment_cache):,}")
+    logging.info(f"   - Batch cache size: {len(_batch_cache):,}")
     
     # Clear caches
     _sentiment_cache.clear()
@@ -765,7 +738,7 @@ def clear_sentiment_caches():
     categorize_source.cache_clear()
     get_top_headlines.cache_clear()
     
-    print("All caches cleared")
+    logging.info("All caches cleared")
 
 def get_cache_stats():
     """Get current cache statistics"""

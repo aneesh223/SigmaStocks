@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytz
 import sys
 import os
+import logging
 
 # Conditional matplotlib import
 try:
@@ -16,7 +17,7 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
-    print("Warning: matplotlib not available, plotting disabled")
+    logging.warning("matplotlib not available, plotting disabled")
 
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
@@ -88,9 +89,9 @@ class AlpacaBacktester:
                 api_key=config.API_KEY,
                 secret_key=config.API_SECRET
             )
-            print("Alpaca client initialized successfully")
+            logging.info("Alpaca client initialized successfully")
         except Exception as e:
-            print(f"Error initializing Alpaca client: {e}")
+            logging.error(f"Error initializing Alpaca client: {e}")
             raise
     
     def fetch_historical_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -105,7 +106,7 @@ class AlpacaBacktester:
             DataFrame with OHLCV data
         """
         try:
-            print(f"Fetching historical data for {self.ticker} from {start_date.date()} to {end_date.date()}...")
+            logging.info(f"Fetching historical data for {self.ticker} from {start_date.date()} to {end_date.date()}...")
             
             # Create request for daily bars
             request_params = StockBarsRequest(
@@ -144,14 +145,14 @@ class AlpacaBacktester:
                 elif price_data.index.tz != pytz.UTC:
                     price_data.index = price_data.index.tz_convert('UTC')
                 
-                print(f"Fetched {len(price_data)} days of price data")
+                logging.info(f"Fetched {len(price_data)} days of price data")
                 return price_data
             else:
-                print(f"No price data found for {self.ticker}")
+                logging.warning(f"No price data found for {self.ticker}")
                 return pd.DataFrame()
                 
         except Exception as e:
-            print(f"Error fetching historical data: {e}")
+            logging.error(f"Error fetching historical data: {e}")
             return pd.DataFrame()
     
     def fetch_news_data(self, days: int = 90, end_date: datetime = None) -> List[Tuple]:
@@ -166,18 +167,18 @@ class AlpacaBacktester:
             List of news tuples (timestamp, headline, source)
         """
         try:
-            print(f"Fetching {days} days of news data for {self.ticker}...")
+            logging.info(f"Fetching {days} days of news data for {self.ticker}...")
             if end_date:
-                print(f"   Historical news ending at: {end_date.date()}")
+                logging.info(f"   Historical news ending at: {end_date.date()}")
             
             # Use the existing scraper to get news data with historical support
             profile_data, news_data = scraper.scrape_hybrid(self.ticker, days=days, end_date=end_date)
             
-            print(f"Fetched {len(news_data)} news articles")
+            logging.info(f"Fetched {len(news_data)} news articles")
             return news_data
             
         except Exception as e:
-            print(f"Error fetching news data: {e}")
+            logging.error(f"Error fetching news data: {e}")
             return []
     
     def prepare_simulation_data(self, start_date: datetime, end_date: datetime, news_days: int = 90):
@@ -205,9 +206,9 @@ class AlpacaBacktester:
         if self.full_price_data.empty:
             raise ValueError(f"No price data available for {self.ticker}")
         
-        print(f"Simulation data prepared:")
-        print(f"   Price data: {len(self.full_price_data)} records")
-        print(f"   News data: {len(self.full_news_data)} articles")
+        logging.info(f"Simulation data prepared:")
+        logging.info(f"   Price data: {len(self.full_price_data)} records")
+        logging.info(f"   News data: {len(self.full_news_data)} articles")
     
     def filter_news_by_date(self, target_date: datetime) -> List[Tuple]:
         """
@@ -266,7 +267,7 @@ class AlpacaBacktester:
         if action == "BUY" and self.cash > 0:
             # Buy as many shares as possible
             if price <= 0:
-                print(f"Warning: Invalid price {price} for BUY order, skipping...")
+                logging.warning(f"Invalid price {price} for BUY order, skipping...")
                 return
                 
             shares_to_buy = int(self.cash / price)
@@ -299,7 +300,7 @@ class AlpacaBacktester:
                     'Shares_After': self.shares
                 })
                 
-                print(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}) - Cash: ${self.cash:.2f}")
+                logging.info(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}) - Cash: ${self.cash:.2f}")
         
         elif action == "SELL" and self.shares > 0:
             # Sell all shares with transaction costs
@@ -339,7 +340,7 @@ class AlpacaBacktester:
                 'PnL_Dollar_Net': pnl_dollar_net
             })
             
-            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
+            logging.info(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
             self.shares = 0
             self.entry_price = None  # Reset entry price
     
@@ -494,12 +495,12 @@ class AlpacaBacktester:
         """
         # Check overtrading protection
         if action == "BUY" and self.check_overtrading_protection(date, market_regime):
-            print(f"OVERTRADING PROTECTION: Blocking BUY signal (Score: {buy_score:.1f}) - too many recent trades")
+            logging.info(f"OVERTRADING PROTECTION: Blocking BUY signal (Score: {buy_score:.1f}) - too many recent trades")
             return
         
         # Check buy-and-hold mode
         if action == "SELL" and self.check_buy_and_hold_mode(market_regime):
-            print(f"🔒 BUY-AND-HOLD MODE: Blocking SELL signal (Score: {buy_score:.1f}) - sustained bull market detected")
+            logging.info(f"🔒 BUY-AND-HOLD MODE: Blocking SELL signal (Score: {buy_score:.1f}) - sustained bull market detected")
             return
         
         if action == "BUY" and self.cash > 0:
@@ -509,7 +510,7 @@ class AlpacaBacktester:
             
             # Validate price
             if price <= 0:
-                print(f"Warning: Invalid price {price} for BUY order, skipping...")
+                logging.warning(f"Invalid price {price} for BUY order, skipping...")
                 return
             
             # Calculate conviction score for dynamic position sizing
@@ -562,7 +563,7 @@ class AlpacaBacktester:
                 self.recent_trades.append(date)
                 self.last_trade_date = date
                 
-                print(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}, Conviction: {conviction_score:.1f}x) - Cash: ${self.cash:.2f}")
+                logging.info(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}, Conviction: {conviction_score:.1f}x) - Cash: ${self.cash:.2f}")
         
         elif action == "SELL" and self.shares > 0:
             # Sell all shares with transaction costs
@@ -607,7 +608,7 @@ class AlpacaBacktester:
             self.recent_trades.append(date)
             self.last_trade_date = date
             
-            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
+            logging.info(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
             self.shares = 0
             self.entry_price = None  # Reset entry price
     

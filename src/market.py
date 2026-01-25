@@ -1,4 +1,3 @@
-# Memory-optimized imports
 import pandas as pd
 import yfinance as yf
 import numpy as np
@@ -6,6 +5,7 @@ from datetime import datetime, timedelta
 import pytz
 from functools import lru_cache
 from threading import Lock
+import logging
 
 # Thread-safe cache with lock for concurrent access
 _stock_cache = {}
@@ -25,11 +25,10 @@ def get_stock_data(ticker, period="1y"):
     
     try:
         stock = yf.Ticker(ticker)
-        # Optimize data fetching with specific columns only and reduced precision
         data = stock.history(period=period, auto_adjust=True, prepost=False)
         
         if data.empty:
-            print(f"No market data found for {ticker}")
+            logging.warning(f"No market data found for {ticker}")
             return pd.DataFrame()
         
         # Optimize memory usage with float32 precision
@@ -47,7 +46,7 @@ def get_stock_data(ticker, period="1y"):
         return data
     
     except Exception as e:
-        print(f"Error fetching market data for {ticker}: {e}")
+        logging.error(f"Error fetching market data for {ticker}: {e}")
         return pd.DataFrame()
 
 @lru_cache(maxsize=500)
@@ -61,17 +60,15 @@ def calculate_z_score(prices, window=50):
     if len(prices) < window:
         return 0.0
     
-    # Convert to numpy array for faster computation
     prices_array = prices.values
     
     if len(prices_array) == 0:
         return 0.0
     
-    # Vectorized rolling calculations using numpy
+    # Vectorized rolling calculations
     rolling_mean = pd.Series(prices_array).rolling(window=window).mean()
     rolling_std = pd.Series(prices_array).rolling(window=window).std()
     
-    # Get the most recent values with bounds checking
     if len(rolling_mean) == 0 or len(rolling_std) == 0:
         return 0.0
         
@@ -155,7 +152,6 @@ def calculate_macd(prices, fast=12, slow=26, signal=9):
             prev_diff = macd_line.iloc[-2] - signal_line.iloc[-2]
             curr_diff = macd_line.iloc[-1] - signal_line.iloc[-1]
             
-            # Validate values
             if not (pd.isna(prev_diff) or pd.isna(curr_diff)):
                 bullish_crossover = prev_diff <= 0 and curr_diff > 0
         except IndexError:
@@ -207,28 +203,28 @@ def calculate_value_score(z_score):
     # VALUE Strategy: Look for oversold conditions (Z < -2.0)
     if z_score <= -2.5:
         technical_score = 9.0
-        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - DEEP VALUE opportunity."
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - deep value opportunity."
     elif z_score <= -2.0:
         technical_score = 8.0
-        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - Strong BUY signal."
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - strong BUY signal."
     elif z_score <= -1.5:
         technical_score = 7.0
-        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - Good VALUE entry."
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - good value entry."
     elif z_score <= -1.0:
         technical_score = 6.0
-        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - Moderate VALUE."
+        explanation = f"Stock is {abs(z_score):.1f} standard deviations below mean - moderate value."
     elif z_score <= 0.5:
         technical_score = 5.0
-        explanation = f"Stock is near mean (Z-Score: {z_score:.1f}) - NEUTRAL valuation."
+        explanation = f"Stock is near mean (Z-Score: {z_score:.1f}) - neutral valuation."
     elif z_score <= 1.5:
         technical_score = 4.0
-        explanation = f"Stock is {z_score:.1f} standard deviations above mean - Slightly EXPENSIVE."
+        explanation = f"Stock is {z_score:.1f} standard deviations above mean - slightly expensive."
     elif z_score <= 2.0:
         technical_score = 3.0
-        explanation = f"Stock is {z_score:.1f} standard deviations above mean - EXPENSIVE."
+        explanation = f"Stock is {z_score:.1f} standard deviations above mean - expensive."
     else:
         technical_score = 2.0
-        explanation = f"Stock is {z_score:.1f} standard deviations above mean - VERY EXPENSIVE."
+        explanation = f"Stock is {z_score:.1f} standard deviations above mean - very expensive."
     
     return technical_score, explanation
 
@@ -300,7 +296,7 @@ def calculate_momentum_score(macd_line, signal_line, histogram, bullish_crossove
     return technical_score, explanation
 
 def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, custom_date=None, price_data=None):
-    """Calculate trading verdict with optimized B(t) calculation and rolling window Final_Buy_Scores
+    """Calculate trading verdict with B(t) calculation and rolling window Final_Buy_Scores
     
     Args:
         ticker: Stock ticker symbol
@@ -319,7 +315,7 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Strategy': "N/A"
         }
     
-    # Optimized period selection using dictionary lookup
+    # Period selection using dictionary lookup
     period_map = {
         1: "1d", 2: "2d", 5: "5d", 7: "7d", 
         30: "1mo", 90: "3mo", 180: "6mo"
@@ -329,10 +325,10 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
     
     # Use injected price data if provided (for backtesting), otherwise fetch from yfinance
     if price_data is not None:
-        print(f"Using injected price data for backtesting analysis...")
+        logging.info(f"Using injected price data for backtesting analysis...")
         stock_data = price_data.copy()
     else:
-        print(f"Fetching {period} of market data for analysis...")
+        logging.info(f"Fetching {period} of market data for analysis...")
         # Get stock data with caching
         stock_data = get_stock_data(ticker, period=period)
         
@@ -345,21 +341,20 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Strategy': "N/A"
         }
     
-    # Optimized date filtering (still apply filtering logic even with injected data)
+    # Date filtering (still apply filtering logic even with injected data)
     stock_data_filtered = _filter_stock_data(stock_data, lookback_days, custom_date)
     
     if stock_data_filtered.empty:
-        # print(f"Warning: No price data found within {lookback_days} day timeframe, using available data")  # Hidden from user
         stock_data_filtered = stock_data
     
     # Get closing prices for technical analysis
     prices = stock_data_filtered['Close']
     strategy_name = "MOMENTUM" if strategy.lower() == "momentum" else "VALUE"
     
-    # STEP 1: Calculate all B(t) values first (one pass through sentiment data)
+    # Calculate all B(t) values first (one pass through sentiment data)
     buy_scores_at_t = []  # List of (timestamp, B(t)) tuples
     
-    print(f"Calculating B(t) values for {len(sentiment_df)} time periods...")
+    logging.info(f"Calculating B(t) values for {len(sentiment_df)} time periods...")
     
     for timestamp, row in sentiment_df.iterrows():
         sentiment_score = row['Compound_Score']
@@ -439,16 +434,16 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
             'Strategy': strategy_name
         }
     
-    # STEP 2: Calculate Final_Buy_Score at each time t using OPTIMIZED rolling window
+    # Calculate Final_Buy_Score at each time t using rolling window
     final_buy_scores_over_time = []
     timestamps = []
     
     # Define rolling window size (in days) - shorter window for more responsiveness
     rolling_window_days = min(lookback_days if lookback_days > 1 else 3, 5)  # Max 5 days, min 3 days
     
-    print(f"Calculating Final_Buy_Scores using OPTIMIZED {rolling_window_days}-day rolling window...")
+    logging.info(f"Calculating Final_Buy_Scores using {rolling_window_days}-day rolling window...")
     
-    # OPTIMIZATION: Use sliding window with deque for O(N) complexity instead of O(N²)
+    # Use sliding window with deque for O(N) complexity instead of O(N²)
     from collections import deque
     import time
     
@@ -463,7 +458,7 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
         # Define the rolling window: from (t - rolling_window_days) to t
         window_start = timestamp - pd.Timedelta(days=rolling_window_days)
         
-        # OPTIMIZATION: Remove expired entries from LEFT side of deque - O(k) where k << N
+        # Remove expired entries from LEFT side of deque - O(k) where k << N
         while window and window[0][0] < window_start:
             window.popleft()  # O(1) operation
         
@@ -498,7 +493,7 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
         final_buy_scores_over_time.append(final_buy_score_t)
     
     optimization_time = time.time() - start_time
-    print(f"Optimized calculation completed in {optimization_time:.3f} seconds (O(N) complexity)")
+    logging.info(f"Calculation completed in {optimization_time:.3f} seconds")
     
     # For the main program display, use the most recent Final_Buy_Score
     final_buy_score = final_buy_scores_over_time[-1]
@@ -507,7 +502,7 @@ def calculate_verdict(ticker, sentiment_df, strategy="value", lookback_days=30, 
     avg_sentiment = sentiment_df['Compound_Score'].mean()
     avg_technical = np.mean([score for score in final_buy_scores_over_time])  # Average of Final_Buy_Scores
     
-    # Optimized sentiment description using numpy
+    # Sentiment description using numpy
     sentiment_thresholds = np.array([-0.3, -0.1, 0.1, 0.3])
     sentiment_labels = ["VERY NEGATIVE", "MILDLY NEGATIVE", "NEUTRAL", "MILDLY POSITIVE", "VERY POSITIVE"]
     sentiment_idx = np.searchsorted(sentiment_thresholds, avg_sentiment)

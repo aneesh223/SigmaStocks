@@ -1,4 +1,3 @@
-# Memory-optimized matplotlib configuration
 import matplotlib
 matplotlib.use('TkAgg')  # Use TkAgg backend for better macOS compatibility
 import matplotlib.pyplot as plt
@@ -7,6 +6,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import gc  # For garbage collection
+import logging
 
 # Pre-configure matplotlib for better performance
 plt.rcParams['figure.max_open_warning'] = 0  # Disable warning for multiple figures
@@ -15,12 +15,12 @@ plt.rcParams['figure.dpi'] = 100  # Optimize DPI for performance
 plt.rcParams['savefig.dpi'] = 100
 
 def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode="VALUE"):
-    """Optimized plotting function with memory efficiency and better performance"""
+    """Plotting function with memory efficiency and better performance"""
     name, industry, mkt_cap = company_info
     
     # Pre-filter data to avoid unnecessary operations
     if merged_df.empty:
-        print("No data to plot")
+        logging.warning("No data to plot")
         return
     
     # Create figure with optimized settings
@@ -43,13 +43,13 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
         ax1.bar(sentiment_data.index, sentiment_data.values, color=colors, 
                 alpha=0.7, width=bar_width, label='Sentiment Score', rasterized=True)
 
-    # Style the main plot with optimized settings
+    # Style the main plot
     ax1.set_ylabel('Sentiment Score', fontsize=12, fontweight='bold')
     ax1.axhline(0, color='#696969', linewidth=1, linestyle='--', alpha=0.7)
     ax1.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
     ax1.set_facecolor('#FAFAFA')
 
-    # Price plot on secondary axis - optimized for performance
+    # Price plot on secondary axis
     if 'Close' in merged_df.columns and not merged_df['Close'].isna().all():
         ax1_twin = ax1.twinx()
         price_data = merged_df['Close'].dropna()
@@ -77,7 +77,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
                 ax1_twin.scatter(sell_dates, sell_prices, color='#FF0000', marker='v', 
                                s=100, alpha=0.8, zorder=15, label='SELL Signal', edgecolors='black')
 
-    # Optimized legend handling
+    # Legend handling
     lines1, labels1 = ax1.get_legend_handles_labels()
     if 'Close' in merged_df.columns and not merged_df['Close'].isna().all():
         lines2, labels2 = ax1_twin.get_legend_handles_labels()
@@ -86,7 +86,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     else:
         ax1.legend(loc='upper left', frameon=True, fancybox=True, shadow=True, fontsize=10)
 
-    # Second subplot: Total Article Volume - optimized calculation
+    # Second subplot: Total Article Volume
     source_columns = [col for col in merged_df.columns if col.endswith('_Count')]
     if source_columns:
         # Vectorized sum calculation
@@ -104,7 +104,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     ax2.set_facecolor('#FAFAFA')
     ax2.legend(loc='upper right', frameon=True, fancybox=True, shadow=True, fontsize=10)
 
-    # Optimized x-axis formatting with user-friendly timezone display
+    # X-axis formatting with user-friendly timezone display
     if timeframe_days <= 1:
         # For intraday, show times in Eastern Time for better user experience
         import pytz
@@ -129,7 +129,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     
     plt.setp(ax2.xaxis.get_majorticklabels(), rotation=45, fontsize=10)
 
-    # Optimized title and info with signal count
+    # Title and info with signal count
     signal_info = ""
     if hasattr(merged_df, 'attrs') and 'data_info' in merged_df.attrs:
         data_info = merged_df.attrs['data_info']
@@ -141,16 +141,16 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     ax1.set_title(f'{name} ({ticker}) - Sentiment Analysis & Trading Signals{signal_info}', 
                   fontsize=16, fontweight='bold', pad=20)
     
-    # Company info with optimized text rendering
+    # Company info
     info_text = f"Industry: {industry}  •  Market Cap: {mkt_cap}  •  Strategy: {strategy_mode}"
     fig.text(0.5, 0.02, info_text, ha="center", fontsize=11, 
              bbox={"facecolor":"#E6E6FA", "alpha":0.8, "pad":8, "boxstyle":"round,pad=0.5"})
     
-    # Optimized layout and display
+    # Layout and display
     plt.tight_layout()
     plt.subplots_adjust(bottom=0.12)
     
-    # Non-blocking show with optimized rendering
+    # Non-blocking show
     plt.show(block=False)
     plt.draw()  # Force immediate rendering
     
@@ -160,7 +160,7 @@ def plot_graph(ticker, merged_df, company_info, timeframe_days=30, strategy_mode
     # Display simplified data summary
     if hasattr(merged_df, 'attrs') and 'data_info' in merged_df.attrs:
         data_info = merged_df.attrs['data_info']
-        print(f"\nAnalysis Complete")
-        print(f"Market data: {data_info['price_records']} records")
-        print(f"News data: {data_info['sentiment_records']} articles analyzed")
-        print(f"Time periods: {data_info['merged_records']} data points")
+        logging.info(f"\nAnalysis Complete")
+        logging.info(f"Market data: {data_info['price_records']} records")
+        logging.info(f"News data: {data_info['sentiment_records']} articles analyzed")
+        logging.info(f"Time periods: {data_info['merged_records']} data points")

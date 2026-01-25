@@ -8,12 +8,12 @@ import sys
 import os
 import matplotlib
 import matplotlib.pyplot as plt
+import logging
 
-# 1. FORCE NO-UI BACKEND
+# Force no-UI backend
 matplotlib.use('Agg')
 
-# 2. MONKEY PATCH: Disable plt.show() completely
-# This prevents the "flash" by making show() do absolutely nothing.
+# Monkey patch: Disable plt.show() completely
 plt.show = lambda *args, **kwargs: None
 
 from datetime import datetime
@@ -29,8 +29,8 @@ sys.path.insert(0, root_dir)    # Add project root to path
 try:
     from input import analyze_stock
 except ImportError:
-    print("Error: Could not import 'input.py'. Make sure you're running from the correct directory.")
-    print("   Try: python src/main/headless.py <ticker> <strategy> <period>")
+    logging.error("Error: Could not import 'input.py'. Make sure you're running from the correct directory.")
+    logging.error("   Try: python src/main/headless.py <ticker> <strategy> <period>")
     sys.exit(1)
 
 def parse_period(period_arg, next_arg=None):
@@ -76,23 +76,22 @@ def main():
     
     try:
         # Run Analysis
-        # Because we patched plt.show, this will NOT pop up a window
         analyze_stock(ticker, lookback_days, strategy)
         
         if save_plot:
             # Manually save the current figure since show() didn't clear it
             filename = f"analysis_{ticker}_{strategy}_{datetime.now().strftime('%Y%m%d')}.png"
             plt.savefig(filename)
-            print(f"\nPlot saved to: {filename}")
+            logging.info(f"\nPlot saved to: {filename}")
             
-        print(f"\nAnalysis Complete.")
+        logging.info(f"\nAnalysis Complete.")
         return 0
         
     except KeyboardInterrupt:
-        print("\nAnalysis interrupted.")
+        logging.info("\nAnalysis interrupted.")
         return 0
     except Exception as e:
-        print(f"\nFatal Error: {e}")
+        logging.error(f"\nFatal Error: {e}")
         return 1
 
 if __name__ == "__main__":

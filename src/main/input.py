@@ -1,8 +1,8 @@
-# Memory-optimized imports
 from datetime import datetime, timedelta
 import pytz
 import sys
 import os
+import logging
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
@@ -35,30 +35,29 @@ def get_last_trading_day(date=None):
         return date - timedelta(days=2)  # Go back to Friday
 
 def analyze_stock(ticker, lookback_days, strategy_mode):
-    """Optimized stock analysis with memory efficiency"""
-    print(f"\nAnalyzing {ticker}...")
+    """Stock analysis with memory efficiency"""
+    logging.info(f"\nAnalyzing {ticker}...")
     
     try:
-        # Memory-efficient data fetching
         profile_data, raw_data = scraper.scrape_hybrid(ticker, days=lookback_days)
         company_name, industry, mkt_cap = profile_data
         
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(f"Error: {e}")
         return
     
     if not raw_data:
-        print("No data found. Check your connection.")
+        logging.warning("No data found. Check your connection.")
         return
     
-    # Optimized sentiment analysis
+    # Sentiment analysis
     sentiment_df = analyzer.get_sentiment(raw_data, ticker, lookback_days)
     best_news, worst_news = analyzer.get_top_headlines_wrapper(raw_data, ticker, lookback_days)
     
-    # Optimized date filtering with trading day awareness
+    # Date filtering with trading day awareness
     today = get_last_trading_day()  # Use last trading day instead of raw datetime.now()
     if today.date() != datetime.now().date():
-        print(f"Note: Using last trading day ({today.strftime('%A, %B %d')}) - Markets closed on weekends")
+        logging.info(f"Note: Using last trading day ({today.strftime('%A, %B %d')}) - Markets closed on weekends")
         
     if lookback_days <= 1:
         cutoff_date = today.date()
@@ -70,7 +69,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
         sentiment_df = sentiment_df[sentiment_df.index >= cutoff_date]
 
     if sentiment_df.empty:
-        print(f"No relevant news found for {ticker}.")
+        logging.warning(f"No relevant news found for {ticker}.")
         return
     
     # Calculate verdict and display results
@@ -109,7 +108,7 @@ def analyze_stock(ticker, lookback_days, strategy_mode):
         print(f"\nTOP NEGATIVE NEWS:\n>> {worst_news}")
         print("="*50 + "\n")
     
-    # Generate optimized visualization
+    # Generate visualization
     final_df = market.get_visualization_data(ticker, sentiment_df, lookback_days)
     visualizer.plot_graph(ticker, final_df, profile_data, lookback_days, strategy_mode)
 

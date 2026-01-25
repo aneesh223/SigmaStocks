@@ -1,4 +1,3 @@
-# Memory-optimized imports - only import what we need
 import ssl
 import yfinance as yf
 from gnews import GNews
@@ -9,6 +8,7 @@ import concurrent.futures
 from threading import Lock
 import time
 import config
+import logging
 
 # SSL optimization
 try:
@@ -17,7 +17,7 @@ try:
 except AttributeError:
     pass
 
-# Thread-safe cache with optimized memory usage
+# Thread-safe cache
 _profile_cache = {}
 _cache_lock = Lock()
 
@@ -61,7 +61,7 @@ def get_profile_data(ticker):
         return result
         
     except Exception as e:
-        print(f"API Error: {e}")
+        logging.error(f"API Error: {e}")
         fallback = (ticker.upper(), "N/A", "N/A")
         
         with _cache_lock:
@@ -92,7 +92,7 @@ def scrape_alpaca_news(ticker, days=30, end_date=None):
             secret_key=config.API_SECRET
         )
     except Exception as e:
-        print(f"Alpaca Client Error: {e}. Check config.py.")
+        logging.error(f"Alpaca Client Error: {e}. Check config.py.")
         return profile_data, []
     
     # Calculate date range - support historical backtesting
@@ -153,7 +153,7 @@ def scrape_alpaca_news(ticker, days=30, end_date=None):
         return profile_data, parsed
 
     except Exception as e:
-        print(f"Alpaca News Error: {e}")
+        logging.error(f"Alpaca News Error: {e}")
         return profile_data, []
 
 def scrape_gnews(ticker, days=30, end_date=None):
@@ -209,20 +209,20 @@ def scrape_gnews(ticker, days=30, end_date=None):
             
         return profile_data, parsed
     except Exception as e:
-        print(f"GNews Error: {e}")
+        logging.error(f"GNews Error: {e}")
         return profile_data, []
 
 def scrape_hybrid(ticker, days=30, end_date=None):
     """
-    OPTIMIZED COMBINED SCRAPER: Fetches from both Alpaca and Google News.
-    Uses memory-efficient deduplication and parallel processing.
+    Combined scraper: Fetches from both Alpaca and Google News.
+    Uses deduplication and parallel processing.
     
     Args:
         ticker: Stock symbol
         days: Number of days to look back
         end_date: End date for news search (defaults to now, supports historical backtesting)
     """
-    # 1. Fetch from Alpaca (Fast, reliable, structured) - parallel execution
+    # Fetch from Alpaca (Fast, reliable, structured) - parallel execution
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         alpaca_future = executor.submit(scrape_alpaca_news, ticker, days, end_date)
         gnews_future = executor.submit(scrape_gnews, ticker, days, end_date)
@@ -231,13 +231,13 @@ def scrape_hybrid(ticker, days=30, end_date=None):
         profile_data, alpaca_news = alpaca_future.result()
         _, gnews_news = gnews_future.result()
     
-    # 3. Memory-efficient merge and deduplication using sets
+    # Merge and deduplication using sets
     all_news = alpaca_news + gnews_news
     
     if not all_news:
         return profile_data, []
     
-    # Use memory-efficient deduplication with generator expression
+    # Use deduplication with generator expression
     seen_headlines = set()
     unique_news = []
     
