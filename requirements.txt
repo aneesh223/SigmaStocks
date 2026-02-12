@@ -13,6 +13,7 @@ gnews>=0.3.0
 vaderSentiment>=3.3.2
 transformers>=4.30.0
 torch>=2.0.0
+torchvision>=0.15.0
 tokenizers>=0.13.0
 
 # Utilities

@@ -49,6 +49,33 @@ def get_stock_data(ticker, period="1y"):
         logging.error(f"Error fetching market data for {ticker}: {e}")
         return pd.DataFrame()
 
+@lru_cache(maxsize=100)
+def get_intraday_data(ticker: str) -> pd.DataFrame:
+    """
+    Fetch 1-minute intraday data for the last 5 trading days.
+    
+    Args:
+        ticker: Stock symbol (e.g., "AAPL")
+    
+    Returns:
+        DataFrame with columns: Open, High, Low, Close, Volume
+        Index: DatetimeIndex with 1-minute frequency
+        Returns empty DataFrame on error
+    """
+    try:
+        stock = yf.Ticker(ticker)
+        data = stock.history(period="5d", interval="1m")
+        
+        if data.empty:
+            logging.warning(f"No intraday data found for {ticker}")
+            return pd.DataFrame()
+        
+        return data
+    
+    except Exception as e:
+        logging.error(f"Error fetching intraday data for {ticker}: {e}")
+        return pd.DataFrame()
+
 @lru_cache(maxsize=500)
 def calculate_z_score_cached(prices_tuple, window=50):
     """Calculate Z-Score with caching - prices as tuple for hashing"""

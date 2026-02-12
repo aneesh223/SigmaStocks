@@ -707,6 +707,39 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
     # Apply conviction to confidence
     confidence = min(100, confidence * conviction_score)
     
+    # Apply microstructure adjustment
+    try:
+        from src.microstructure import analyze_liquidity
+        
+        microstructure = analyze_liquidity(ticker)
+        anomaly_score = microstructure['anomaly_score']
+        
+        # Only adjust BUY recommendations
+        if recommendation == "BUY":
+            original_confidence = confidence
+            if anomaly_score > 0.8:
+                # Critical liquidity void - reduce confidence by 30%
+                confidence *= 0.7
+                reasoning += f" | Microstructure: {microstructure['status']} (score: {anomaly_score:.2f})"
+                logger.info(f"Microstructure adjustment applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f} (anomaly score: {anomaly_score:.2f})")
+            elif anomaly_score > 0.7:
+                # High volatility - reduce confidence by 15%
+                confidence *= 0.85
+                reasoning += f" | Microstructure: {microstructure['status']} (score: {anomaly_score:.2f})"
+                logger.info(f"Microstructure adjustment applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f} (anomaly score: {anomaly_score:.2f})")
+            elif anomaly_score < 0.2:
+                # Strong accumulation - boost confidence by 20%
+                confidence *= 1.2
+                reasoning += f" | Microstructure: {microstructure['status']} (score: {anomaly_score:.2f})"
+                logger.info(f"Microstructure adjustment applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f} (anomaly score: {anomaly_score:.2f})")
+            
+            # Ensure confidence stays in [0, 100]
+            confidence = max(0, min(100, confidence))
+    
+    except Exception as e:
+        # Fail gracefully - don't break existing logic
+        logger.warning(f"Microstructure analysis failed: {e}")
+    
     return {
         'recommendation': recommendation,
         'confidence': max(0, min(100, confidence)),
