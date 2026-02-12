@@ -313,8 +313,22 @@ python backtester/examples.py
 
 ### Convolutional Order Book Usage
 
-The CNN-based microstructure analysis runs automatically during trading analysis. You can also use it directly:
+The CNN-based microstructure analysis is **automatically integrated** into the trading recommendation system. It runs in real-time during analysis and adjusts confidence levels based on market microstructure conditions.
 
+**Automatic Integration:**
+```python
+# When you run the main program, microstructure analysis happens automatically
+python src/main/input.py
+
+# Enter ticker: AAPL
+# The system will:
+# 1. Fetch 1-minute intraday data
+# 2. Generate liquidity heatmap
+# 3. Run CNN inference
+# 4. Adjust trading confidence based on anomaly score
+```
+
+**Manual Usage:**
 ```python
 from src.microstructure import analyze_liquidity
 
@@ -332,10 +346,21 @@ print(f"Confidence: {result['confidence']}")
 # - Score < 0.20: Strong accumulation (bullish signal)
 ```
 
+**Impact on Trading Recommendations:**
+- **BUY signals** with anomaly score > 0.85: Confidence reduced by 30%
+- **BUY signals** with anomaly score > 0.70: Confidence reduced by 15%
+- **BUY signals** with anomaly score < 0.20: Confidence boosted by 20%
+- **SELL signals** with anomaly score > 0.85: Confidence boosted by 15% (confirmation)
+
 **Requirements:**
 - Minimum 10 minutes of 1-minute intraday data
 - Automatically fetches data via `get_intraday_data(ticker)`
 - GPU acceleration used if available (CUDA)
+
+**Limitations:**
+- Only works for real-time trading (requires current intraday data)
+- Not available for historical backtesting (no historical 1-minute data)
+- Gracefully degrades if data unavailable (doesn't break existing logic)
 
 ### Output Interpretation
 - **Market Sentiment**: 0-10 scale based on hybrid AI sentiment analysis
@@ -493,15 +518,25 @@ pytest tests/ -m integration  # Integration tests only
 pytest tests/test_cnn_output_range.py  # Property-based tests
 pytest tests/test_analyze_liquidity.py  # Unit tests
 
+# Run COB impact verification tests
+python3 tests/test_cob_scenarios.py  # Scenario testing (recommended)
+python3 tests/test_cob_impact.py     # Real-world testing
+
 # Run with verbose output
 pytest tests/ -v
 ```
 
 **Test Coverage:**
-- 25 test files covering CNN architecture, heatmap generation, and microstructure analysis
+- 27 test files covering CNN architecture, heatmap generation, and microstructure analysis
 - Property-based tests using Hypothesis for invariant validation
 - Integration tests for end-to-end flow verification
 - Edge case and error handling tests
+- **COB impact verification tests** demonstrating real-world effectiveness
+
+**COB Impact Tests:**
+- `test_cob_scenarios.py` - Simulates 5 market conditions to verify adjustments
+- `test_cob_impact.py` - Tests with live market data
+- See `COB_IMPACT_RESULTS.md` for detailed verification results
 
 ## 📝 License
 
