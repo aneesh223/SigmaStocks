@@ -2,15 +2,15 @@
 
 **An advanced algorithmic trading platform that combines DistilRoBERTa transformer models with sophisticated technical analysis to generate data-driven investment insights. Features comprehensive backtesting, adaptive risk management, and market regime detection for systematic trading strategies.**
 
-## 🎯 **What Makes Orthrus Special**
+## What Makes Orthrus Special
 
-- **🤖 Hybrid AI Sentiment Analysis (Hence the Name)**: Combines VADER + DistilRoBERTa for superior financial news interpretation
-- **📈 Adaptive Market Regime Detection**: Automatically adjusts strategy based on BULL/BEAR/SIDEWAYS market conditions  
-- **🎯 Comprehensive Testing Framework**: Extensive backtesting across multiple market scenarios and timeframes
-- **🛡️ Advanced Risk Management**: Dynamic stop-loss, take-profit, and volatility protection systems
-- **⚡ Production-Ready**: Professional-grade backtesting system with fair performance comparisons
+- **Hybrid AI Sentiment Analysis (Hence the Name)**: Combines VADER + DistilRoBERTa for superior financial news interpretation
+- **Adaptive Market Regime Detection**: Automatically adjusts strategy based on BULL/BEAR/SIDEWAYS market conditions  
+- **Comprehensive Testing Framework**: Extensive backtesting across multiple market scenarios and timeframes
+- **Advanced Risk Management**: Dynamic stop-loss, take-profit, and volatility protection systems
+- **Production-Ready**: Professional-grade backtesting system with fair performance comparisons
 
-## 🚀 Features
+## Features
 
 ### Dual Trading Strategies
 - **VALUE Strategy**: Rolling window Final_Buy_Score analysis for identifying statistically oversold opportunities
@@ -57,7 +57,7 @@
 - **Bull Market Optimization**: Volatility tolerance system for maximum bull market participation
 - **CLI Interface**: Streamlined command-line backtesting with comprehensive batch testing
 
-## 📊 Technical Specifications
+## Technical Specifications
 
 ### Shared Logic Architecture
 The system uses a unified logic module (`src/logic.py`) that ensures consistency between the main program and backtester:
@@ -126,7 +126,7 @@ The revolutionary hybrid approach combines two complementary AI models:
 - **AGGREGATORS** (Weight: 1.0-1.5): Yahoo Finance, MarketWatch, Benzinga
 - **ENTERTAINMENT** (Weight: 0.3-0.8): Motley Fool, Reddit, Social Media
 
-## 🔒 Security & API Keys
+## Security & API Keys
 
 **IMPORTANT**: This project requires Alpaca API keys for market data access.
 
@@ -137,12 +137,12 @@ The revolutionary hybrid approach combines two complementary AI models:
 4. Copy `.env.example` to `.env` and add your keys
 
 ### **Security Best Practices**
-- ✅ API keys are loaded via environment variables (secure)
-- ✅ `.env` file is in `.gitignore` (not committed to repo)
-- ✅ Uses paper trading endpoint (no real money at risk)
-- ⚠️ **Never commit real API keys to version control**
+- API keys are loaded via environment variables (secure)
+- `.env` file is in `.gitignore` (not committed to repo)
+- Uses paper trading endpoint (no real money at risk)
+- **Never commit real API keys to version control**
 
-## 🛠 Installation
+## Installation
 
 1. **Clone the repository**
    ```bash
@@ -172,7 +172,7 @@ The revolutionary hybrid approach combines two complementary AI models:
    ALPACA_SECRET_KEY=your_actual_secret_here
    ```
 
-## 🎯 Usage
+## Usage
 
 ### Real-Time Analysis
 
@@ -197,34 +197,126 @@ The revolutionary hybrid approach combines two complementary AI models:
 
 ### Historical Backtesting
 
+## Optimal Backtesting Timeframes
+
+**Critical**: Different strategies require different testing periods to validate their mathematical edge. Using the wrong timeframe will produce misleading results.
+
+### MOMENTUM Strategy: 3-5 Years (Recommended: 5 Years)
+
+**Why This Matters:**
+1. **200-Day SMA Warm-Up**: The Golden Cross/Death Cross signals rely on a 200-day moving average. The first ~10 months of any backtest are just "warming up" this indicator, so a 1-year test only yields 2 months of actual data.
+
+2. **Full Market Cycle Coverage**: A 3-5 year window perfectly captures:
+   - A parabolic bull run (2020-2021 style)
+   - A severe bear market (2022 crash)
+   - Choppy sideways consolidation periods
+   
+   This tests the dynamic threshold system across all market regimes.
+
+3. **Statistical Significance**: Momentum swing trades trigger less frequently than high-frequency strategies. A 3-5 year window guarantees 100+ trades per ticker, providing the sample size needed to prove the mathematical edge.
+
+**Implementation:**
+```bash
+# Use strategy default (5 years)
+python backtester/run_backtest.py TSLA m
+
+# Minimum recommended (3 years = 1095 days)
+python backtester/run_backtest.py NVDA m 1095
+
+# Optimal period (5 years = 1825 days)
+python backtester/run_backtest.py AAPL m 1825
+
+# Custom date range (5 years)
+python backtester/run_backtest.py GOOGL m 2019-01-01 2024-01-01
+```
+
+### VALUE Strategy: 5-10+ Years (Recommended: 10 Years)
+
+**Why This Matters:**
+1. **Long-Term Mean Reversion**: Value investing and contrarian plays rely on long-term mean reversion. Market cycles take years to play out - a stock can stay "oversold" for 18+ months before reverting.
+
+2. **Risk Management Validation**: The VALUE strategy emphasizes capital preservation and conservative risk management. Testing on shorter timeframes only captures a single market mood and won't accurately test how the system performs during actual market crashes (2008, 2020, 2022).
+
+3. **Multiple Regime Transitions**: A 10-year period captures:
+   - Multiple bull/bear market transitions
+   - Various economic cycles (expansion, recession, recovery)
+   - Different volatility regimes
+   - Real stress-testing of stop-loss and position sizing
+
+**Implementation:**
+```bash
+# Use strategy default (10 years)
+python backtester/run_backtest.py AAPL v
+
+# Minimum recommended (5 years = 1825 days)
+python backtester/run_backtest.py MSFT v 1825
+
+# Optimal period (10 years = 3650 days)
+python backtester/run_backtest.py GOOGL v 3650
+
+# Extended testing (15 years = 5475 days)
+python backtester/run_backtest.py JPM v 5475
+
+# Custom date range (10 years)
+python backtester/run_backtest.py AMZN v 2014-01-01 2024-01-01
+```
+
+### Quick Comparison Table
+
+| Strategy | Minimum | Recommended | Maximum | Why |
+|----------|---------|-------------|---------|-----|
+| **MOMENTUM** | 3 years (1095 days) | 5 years (1825 days) | 10 years | SMA warm-up + full cycle coverage |
+| **VALUE** | 5 years (1825 days) | 10 years (3650 days) | MAX | Mean reversion + crash testing |
+
+### Batch Testing Note
+
+The `batch_backtest.py` tool uses randomized periods (30-365 days) by default for **diversity testing** - validating the algorithm works across various market conditions. For **production validation** and proving the mathematical edge, always use the optimal periods above.
+
+```bash
+# Diverse testing (30-365 days, multiple scenarios)
+python backtester/batch_backtest.py 50 --seed 123
+
+# Optimal period testing (3-10 years, strategy-aware)
+python backtester/batch_backtest.py 50 --seed 123 --optimal-periods
+```
+
 #### Quick Start
 ```bash
-# Basic backtest
-python backtester/run_backtest.py TSLA m 30
+# Basic backtest with strategy defaults
+python backtester/run_backtest.py TSLA m    # 5 years for momentum
+python backtester/run_backtest.py AAPL v    # 10 years for value
+
+# Custom period
+python backtester/run_backtest.py NVDA m 1095  # 3 years
 
 # With custom capital and visualization
-python backtester/run_backtest.py AAPL v 180 25000 --plot --save
+python backtester/run_backtest.py MSFT v 3650 25000 --plot --save  # 10 years
 ```
 
 #### Command Structure
 ```bash
-python backtester/run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
+python backtester/run_backtest.py <ticker> <strategy> [period] [cash] [--plot] [--save]
 ```
 
 **Parameters:**
 - **ticker**: Stock symbol (TSLA, AAPL, NVDA, MSFT, etc.)
 - **strategy**: `v` (VALUE) or `m` (MOMENTUM)
-- **period**: Days (30, 90, 180) OR date range (2023-01-20 2023-07-20)
+- **period**: [OPTIONAL] Days (1095, 1825, 3650) OR date range (2019-01-01 2024-01-01)
+  - If omitted, uses strategy default (momentum=5yr, value=10yr)
 - **cash**: Starting capital (default: $10,000)
 - **--plot**: Show performance charts
+- **--no-plot**: Disable charts (useful for batch testing)
 - **--save**: Save results to JSON file
 
 #### Advanced Testing
 ```bash
-# Random batch testing (new flexible approach)
+# Random batch testing with diverse periods (30-365 days)
 python backtester/batch_backtest.py           # Run 10 random backtests
 python backtester/batch_backtest.py 25        # Run 25 random backtests  
 python backtester/batch_backtest.py 50 --seed 123  # Reproducible results
+
+# Optimal period testing (strategy-aware: momentum=3-5yr, value=5-10yr)
+python backtester/batch_backtest.py 50 --seed 123 --optimal-periods
 
 # View all usage examples and tips
 python backtester/examples.py
@@ -244,7 +336,7 @@ python backtester/examples.py
 - **Risk Management**: Regime-specific stop-loss and take-profit recommendations
 - **Top Headlines**: Best/worst sentiment-scored news with confidence scores
 
-## 📈 Strategy Details
+## Strategy Details
 
 ### VALUE Strategy
 - **Objective**: Identify statistically oversold stocks using rolling window analysis
@@ -263,7 +355,7 @@ python backtester/examples.py
 - **Best For**: Swing trading, trend following, momentum plays
 - **Risk Management**: Dynamic thresholds with aggressive profit-taking
 
-## 📈 Backtesting System
+## Backtesting System
 
 ### Comprehensive Strategy Testing
 - **Location**: `backtester/` folder
@@ -319,13 +411,13 @@ python backtester/examples.py
 ```
 
 #### Pro Tips
+- **Use Strategy Defaults**: Always start with strategy defaults (momentum=5yr, value=10yr) unless testing specific hypotheses
+- **Minimum Periods**: Momentum needs 3+ years, Value needs 5+ years for statistical validity
 - **Historical Dates**: Use dates 15+ days old to avoid API rate limits
-- **Momentum Strategy**: Works best with 30-90 day periods for swing trading
-- **Value Strategy**: Optimal with 90-180 day periods for long-term analysis
-- **Validation**: Test multiple tickers to validate strategy robustness
-- **Market Conditions**: Test across different market regimes (bull/bear/sideways)
+- **Validation**: Test multiple tickers to validate strategy robustness across sectors
+- **Market Conditions**: Longer periods automatically capture different market regimes (bull/bear/sideways)
 - **Capital Testing**: Try different starting amounts to test scalability
-- **Random Testing**: Use batch_backtest.py for diverse, unbiased testing across sectors and time periods
+- **Batch Testing**: Use `--optimal-periods` flag for production validation, default mode for diversity testing
 
 ### Performance Optimization
 - **Efficient Data Processing**: All sentiment analysis done once at startup
@@ -333,11 +425,11 @@ python backtester/examples.py
 - **Fast Simulation**: Lookup-based trading decisions for maximum speed
 - **Memory Management**: Optimized data structures and garbage collection
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 **This tool is for educational and research purposes only. Do not rely solely on SigmaStocks for investment decisions. Always conduct your own research and consider consulting with financial professionals before making investment choices.**
 
-## 🔧 Requirements
+## Requirements
 
 - Python 3.8+
 - Internet connection for real-time data
@@ -345,7 +437,7 @@ python backtester/examples.py
 - Optional: CUDA-compatible GPU for faster sentiment analysis
 - See `requirements.txt` for complete dependency list
 
-## 📦 Dependencies
+## Dependencies
 
 ### Core Analysis
 - `pandas>=2.0.0` - Data manipulation and analysis
@@ -367,7 +459,7 @@ python backtester/examples.py
 - `pytz>=2023.3` - Timezone handling for historical data
 - `concurrent.futures` - Parallel processing for efficiency
 
-## 📝 License
+## License
 
 This project is licensed under the GNU GPLv3 License - see the LICENSE file for details.
 
