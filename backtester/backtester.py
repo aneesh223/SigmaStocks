@@ -602,8 +602,10 @@ class AlpacaBacktester:
         else:
             end_date = end_date.astimezone(pytz.utc)
         
-        # Prepare simulation data
-        news_days = max(90, (end_date - start_date).days + 30)  # Ensure enough news data
+        # OPTIMIZATION: Limit news data to simulation period + small buffer
+        # Fetching 90+ days of news for short backtests is wasteful
+        simulation_days = (end_date - start_date).days
+        news_days = min(90, max(30, simulation_days + 10))  # Cap at 90 days, min 30 days
         self.prepare_simulation_data(start_date, end_date, news_days)
         
         # Get trading days from price data
@@ -617,47 +619,55 @@ class AlpacaBacktester:
         
         print(f"Simulating {len(trading_days)} trading days...")
         
-        # OPTIMIZATION: Analyze ALL news articles ONCE and calculate ALL scores ONCE
-        print(f"🧠 Analyzing all {len(self.full_news_data)} news articles (one-time processing)...")
-        try:
-            # Analyze all news at once to get complete sentiment DataFrame
-            full_sentiment_df = analyzer.get_sentiment(self.full_news_data, self.ticker, lookback_days)
-            print(f"Sentiment analysis complete: {len(full_sentiment_df)} sentiment records")
-        except Exception as e:
-            print(f"Error in sentiment analysis: {e}")
-            full_sentiment_df = pd.DataFrame()
-        
-        if full_sentiment_df.empty:
-            print("No sentiment data available, using neutral scores")
-            # Create a simple lookup with neutral scores for all trading days
-            score_lookup = {date: 5.0 for date in trading_days}
+        # OPTIMIZATION: Skip sentiment analysis for very short periods (< 7 days)
+        # Use neutral scores to avoid expensive NLP processing
+        if simulation_days < 7 or len(self.full_news_data) == 0:
+            print(f"⚡ Fast mode: Using neutral scores for {simulation_days}-day period (no sentiment analysis)")
+            score_lookup = {date.date() if hasattr(date, 'date') else date: 5.0 for date in trading_days}
         else:
-            # PRE-CALCULATE ALL Final_Buy_Scores using the complete dataset
-            print(f"🔢 Pre-calculating all Final_Buy_Scores for entire period...")
+            # OPTIMIZATION: Analyze ALL news articles ONCE and calculate ALL scores ONCE
+            print(f"🧠 Analyzing {len(self.full_news_data)} news articles (one-time processing)...")
+            try:
+                # Analyze all news at once to get complete sentiment DataFrame
+                full_sentiment_df = analyzer.get_sentiment(self.full_news_data, self.ticker, lookback_days)
+                print(f"Sentiment analysis complete: {len(full_sentiment_df)} sentiment records")
+            except Exception as e:
+                print(f"Error in sentiment analysis: {e}")
+                full_sentiment_df = pd.DataFrame()
             
-            # Calculate verdict using the FULL sentiment and price data
-            verdict = market.calculate_verdict(
-                ticker=self.ticker,
-                sentiment_df=full_sentiment_df,
-                strategy=self.strategy,
-                lookback_days=lookback_days,
-                custom_date=end_date,  # Use end date as reference
-                price_data=self.full_price_data  # Use full price data
-            )
-            
-            # Extract all Final_Buy_Scores and create a lookup dictionary
-            final_buy_scores_over_time = verdict.get('Final_Buy_Scores_Over_Time', [])
-            score_lookup = {}
-            
-            for timestamp, score in final_buy_scores_over_time:
-                # Create lookup by date for fast access
-                if hasattr(timestamp, 'date'):
-                    date_key = timestamp.date()
-                else:
-                    date_key = timestamp
-                score_lookup[date_key] = score
-            
-            print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
+            if full_sentiment_df.empty:
+                print("No sentiment data available, using neutral scores")
+                # Create a simple lookup with neutral scores for all trading days
+                score_lookup = {date.date() if hasattr(date, 'date') else date: 5.0 for date in trading_days}
+            else:
+                # PRE-CALCULATE ALL Final_Buy_Scores using the complete dataset
+                print(f"🔢 Pre-calculating all Final_Buy_Scores for entire period...")
+                
+                # Calculate verdict using the FULL sentiment and price data
+                verdict = market.calculate_verdict(
+                    ticker=self.ticker,
+                    sentiment_df=full_sentiment_df,
+                    strategy=self.strategy,
+                    lookback_days=lookback_days,
+                    custom_date=end_date,  # Use end date as reference
+                    price_data=self.full_price_data  # Use full price data
+                )
+                
+                # Extract all Final_Buy_Scores and create a lookup dictionary
+                final_buy_scores_over_time = verdict.get('Final_Buy_Scores_Over_Time', [])
+                score_lookup = {}
+                
+                for timestamp, score in final_buy_scores_over_time:
+                    # Create lookup by date for fast access
+                    if hasattr(timestamp, 'date'):
+                        date_key = timestamp.date()
+                    else:
+                        date_key = timestamp
+                    score_lookup[date_key] = score
+                
+                print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
+                
+                print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
         
         print()
         
@@ -669,6 +679,10 @@ class AlpacaBacktester:
         risk_params = self.get_adaptive_risk_params(initial_market_regime)
         print(f"Initial Adaptive Parameters: Stop-loss: {risk_params['stop_loss_pct']*100:.0f}%, Take-profit: {risk_params['take_profit_pct']*100:.0f}%, Position size: {risk_params['position_size_multiplier']:.1f}x")
         print()
+        
+        # OPTIMIZATION: Reduce regime update frequency for longer backtests
+        # Update every 5 days for short tests, every 10 days for long tests
+        regime_update_interval = 10 if simulation_days > 180 else 5
         
         # Simulation loop - now extremely fast since everything is pre-calculated
         score_history = []  # Track scores for dynamic thresholds and momentum reversal detection
@@ -709,8 +723,9 @@ class AlpacaBacktester:
                 # Calculate portfolio value
                 portfolio_value = self.cash + (self.shares * current_price)
                 
-                # MOMENTUM REVERSAL DETECTION: Check for regime changes every 5 days
-                if i > 0 and i % 5 == 0 and len(score_history) >= 10:
+                # OPTIMIZATION: Reduce momentum reversal detection frequency
+                # Check for regime changes at configurable intervals (not every 5 days)
+                if i > 0 and i % regime_update_interval == 0 and len(score_history) >= 10:
                     # Get recent price data for reversal detection
                     try:
                         recent_price_data = self.full_price_data.loc[:simulation_date].tail(10)
@@ -810,8 +825,10 @@ class AlpacaBacktester:
                     'Market_Regime': current_market_regime  # Track dynamic regime changes
                 })
                 
-                # Progress update every 10 days with buy score info and adaptive thresholds
-                if (i + 1) % 10 == 0:
+                # OPTIMIZATION: Reduce progress update frequency for longer backtests
+                # Update every 10 days for short tests, every 30 days for long tests
+                progress_interval = 30 if simulation_days > 180 else 10
+                if (i + 1) % progress_interval == 0:
                     buy_thresh, sell_thresh = self.calculate_adaptive_thresholds(score_history, current_market_regime)
                     print(f"Day {i+1}/{len(trading_days)}: ${portfolio_value:,.2f} (Score: {buy_score_t:.1f}, {current_market_regime}) | Thresholds: {buy_thresh:.3f}/{sell_thresh:.3f}")
             
