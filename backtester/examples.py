@@ -1,45 +1,67 @@
 #!/usr/bin/env python3
 """
 Orthrus Backtesting Examples
-Quick reference for common backtesting commands
+Quick reference for common backtesting commands with optimal timeframes
 """
 
 def show_examples():
     """Display example commands"""
     
     print("Orthrus Backtesting Examples")
-    print("=" * 50)
+    print("=" * 80)
+    
+    print("\n📊 OPTIMAL BACKTESTING TIMEFRAMES")
+    print("-" * 80)
+    print("MOMENTUM Strategy: 3-5 years (default: 5 years)")
+    print("  Why: • Requires ~10 months to warm up 200-day SMA for Golden/Death Cross")
+    print("       • Captures bull runs, bear markets, and choppy sideways periods")
+    print("       • Provides 100+ trades for statistical significance")
+    print("\nVALUE Strategy: 5-10+ years (default: 10 years)")
+    print("  Why: • Tests long-term mean reversion across full market cycles")
+    print("       • Validates conservative risk management during actual crashes")
+    print("       • Captures multiple bull/bear regime transitions")
+    print("=" * 80)
     
     examples = [
         {
-            'title': 'Basic Momentum Test (30 days)',
-            'command': 'python run_backtest.py TSLA m 30',
-            'description': 'Test TSLA with momentum strategy over last 30 days'
+            'title': 'Momentum Strategy (Default 5 Years)',
+            'command': 'python run_backtest.py TSLA m',
+            'description': 'Test TSLA with momentum strategy using optimal 5-year period'
         },
         {
-            'title': 'Value Strategy (6 months)',
-            'command': 'python run_backtest.py AAPL v 180',
-            'description': 'Test AAPL with value strategy over 6 months'
+            'title': 'Value Strategy (Default 10 Years)',
+            'command': 'python run_backtest.py AAPL v',
+            'description': 'Test AAPL with value strategy using optimal 10-year period'
+        },
+        {
+            'title': 'Momentum - Minimum Recommended (3 Years)',
+            'command': 'python run_backtest.py NVDA m 1095',
+            'description': 'Test NVDA momentum with 3-year period (1095 days)'
+        },
+        {
+            'title': 'Value - Extended Period (15 Years)',
+            'command': 'python run_backtest.py MSFT v 5475',
+            'description': 'Test MSFT value with 15-year period for maximum cycle coverage'
         },
         {
             'title': 'Custom Date Range',
-            'command': 'python run_backtest.py NVDA m 2023-01-20 2023-07-20',
-            'description': 'Test NVDA momentum strategy for specific period'
+            'command': 'python run_backtest.py GOOGL m 2019-01-01 2024-01-01',
+            'description': 'Test GOOGL momentum for specific 5-year period'
         },
         {
             'title': 'High Capital Test',
-            'command': 'python run_backtest.py MSFT m 90 50000',
-            'description': 'Test MSFT with $50,000 starting capital'
+            'command': 'python run_backtest.py AMZN v 3650 50000',
+            'description': 'Test AMZN value with $50,000 starting capital over 10 years'
         },
         {
             'title': 'Full Analysis (Plot + Save)',
-            'command': 'python run_backtest.py TSLA m 60 --plot --save',
-            'description': 'Run backtest with charts and save results to file'
+            'command': 'python run_backtest.py TSLA m 1825 --plot --save',
+            'description': 'Run 5-year momentum backtest with charts and save results'
         },
         {
-            'title': 'Quick Comparison',
-            'command': 'python run_backtest.py AAPL m 30 && python run_backtest.py AAPL v 30',
-            'description': 'Compare momentum vs value strategies'
+            'title': 'Strategy Comparison',
+            'command': 'python run_backtest.py AAPL m 1825 && python run_backtest.py AAPL v 3650',
+            'description': 'Compare momentum (5yr) vs value (10yr) with optimal periods'
         }
     ]
     
@@ -48,25 +70,31 @@ def show_examples():
         print(f"   Command: {example['command']}")
         print(f"   Description: {example['description']}")
     
-    print(f"\n{'='*50}")
+    print(f"\n{'='*80}")
     print("Parameter Reference:")
     print("  <ticker>    : Stock symbol (TSLA, AAPL, NVDA, etc.)")
     print("  <strategy>  : m/momentum or v/value")
-    print("  <period>    : Days (30, 90, 180) OR date range (2023-01-20 2023-07-20)")
+    print("  [period]    : OPTIONAL - Days (1095, 1825, 3650) OR date range")
+    print("                If omitted, uses strategy default (momentum=5yr, value=10yr)")
     print("  [cash]      : Starting capital (default: $10,000)")
     print("  --plot      : Show performance charts")
+    print("  --no-plot   : Disable charts (useful for batch testing)")
     print("  --save      : Save results to JSON file")
     
-    print(f"\nPro Tips:")
-    print("  • Use historical dates (15+ days old) to avoid API limits")
-    print("  • Momentum works best with 30-90 day periods")
-    print("  • Value works best with 90-180 day periods")
+    print(f"\n💡 Pro Tips:")
+    print("  • Always use strategy defaults unless testing specific hypotheses")
+    print("  • Momentum: 1095 days (3yr) minimum, 1825 days (5yr) recommended")
+    print("  • Value: 1825 days (5yr) minimum, 3650 days (10yr) recommended")
+    print("  • Use historical dates (15+ days old) to avoid API rate limits")
     print("  • Test multiple tickers to validate strategy robustness")
+    print("  • Longer periods = more statistical significance")
     
-    print(f"\nBatch Testing:")
+    print(f"\n🔄 Batch Testing:")
     print("  python batch_backtest.py           # Run 10 random backtests (default)")
     print("  python batch_backtest.py 25        # Run 25 random backtests")
     print("  python batch_backtest.py 50 --seed 123  # Run 50 tests with reproducible seed")
+    print("\n  Note: Batch tests use randomized periods (30-365 days) for diversity testing")
+    print("        For production validation, use individual tests with optimal periods")
 
 if __name__ == "__main__":
     show_examples()

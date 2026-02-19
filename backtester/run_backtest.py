@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """
 Orthrus Quick Backtesting CLI
-Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--save]
+Usage: python run_backtest.py <ticker> <strategy> [period] [cash] [--plot] [--save]
+
+Optimal Backtesting Timeframes:
+  MOMENTUM: 3-5 years (default: 5 years)
+    - Requires ~10 months to warm up 200-day SMA for Golden/Death Cross
+    - Captures bull runs, bear markets, and choppy periods
+    - Provides 100+ trades for statistical significance
+  
+  VALUE: 5-10+ years (default: 10 years)
+    - Tests long-term mean reversion across full market cycles
+    - Validates conservative risk management during crashes
+    - Captures multiple regime transitions
 
 Examples:
-  python run_backtest.py TSLA m 5           # TSLA, momentum, last 5 periods (days)
-  python run_backtest.py AAPL v 90          # AAPL, value, last 90 days  
-  python run_backtest.py NVDA m 2023-01-20 2023-07-20  # Custom date range
-  python run_backtest.py TSLA m 30 15000 --plot --save  # With custom cash, plot, and save
+  python run_backtest.py TSLA m              # TSLA momentum, default 5 years
+  python run_backtest.py AAPL v              # AAPL value, default 10 years
+  python run_backtest.py NVDA m 1095         # NVDA momentum, 3 years (1095 days)
+  python run_backtest.py MSFT v 2015-01-01 2024-12-31  # Custom date range
+  python run_backtest.py TSLA m 1825 15000 --plot --save  # 5 years, custom cash
 """
 
 import sys
@@ -25,17 +37,44 @@ sys.path.insert(0, os.path.join(parent_dir, 'src'))
 sys.path.insert(0, os.path.dirname(__file__))
 from backtester import AlpacaBacktester
 
-def parse_period(period_arg, next_arg=None):
+def get_default_period_days(strategy):
+    """
+    Get optimal default period in days based on strategy.
+    
+    MOMENTUM: 1825 days (5 years)
+      - Requires ~10 months to warm up 200-day SMA
+      - Captures multiple market regimes
+      - Provides statistical significance (100+ trades)
+    
+    VALUE: 3650 days (10 years)
+      - Tests long-term mean reversion
+      - Validates risk management across full cycles
+      - Captures multiple bull/bear transitions
+    """
+    if strategy.lower() == 'momentum':
+        return 1825  # 5 years
+    else:  # value
+        return 3650  # 10 years
+
+def parse_period(period_arg, next_arg=None, strategy='momentum'):
     """
     Parse period argument which can be:
-    - Number (days): 30, 90, 180
+    - None (use strategy default): None
+    - Number (days): 30, 90, 1825
     - Date range: 2023-01-20 (requires next_arg as end date)
     """
+    if period_arg is None:
+        # Use strategy-specific default
+        days = get_default_period_days(strategy)
+        end_date = datetime.now(pytz.utc) - timedelta(days=15)  # 15 days buffer for API
+        start_date = end_date - timedelta(days=days)
+        return start_date, end_date, 0  # Return 0 to indicate no arguments consumed
+    
     try:
         # Try to parse as number of days
         days = int(period_arg)
-        # Use 1 year ago as end date for more stable historical data
-        end_date = datetime.now(pytz.utc) - timedelta(days=365)
+        # Use 15 days ago as end date for API stability
+        end_date = datetime.now(pytz.utc) - timedelta(days=15)
         start_date = end_date - timedelta(days=days)
         return start_date, end_date, 1  # Return 1 to indicate we used 1 argument
     except ValueError:
@@ -53,15 +92,25 @@ def parse_period(period_arg, next_arg=None):
 def main():
     """Command-line backtesting interface"""
     
-    if len(sys.argv) < 4:
-        print("Usage: python run_backtest.py <ticker> <strategy> <period> [cash] [--plot] [--no-plot] [--save]")
+    if len(sys.argv) < 3:
+        print("Usage: python run_backtest.py <ticker> <strategy> [period] [cash] [--plot] [--no-plot] [--save]")
+        print("\nOptimal Backtesting Timeframes:")
+        print("  MOMENTUM: 3-5 years (default: 5 years / 1825 days)")
+        print("    • Requires ~10 months to warm up 200-day SMA for Golden/Death Cross")
+        print("    • Captures bull runs, bear markets, and choppy periods")
+        print("    • Provides 100+ trades for statistical significance")
+        print("\n  VALUE: 5-10+ years (default: 10 years / 3650 days)")
+        print("    • Tests long-term mean reversion across full market cycles")
+        print("    • Validates conservative risk management during crashes")
+        print("    • Captures multiple regime transitions")
         print("\nExamples:")
-        print("  python run_backtest.py TSLA m 30")
-        print("  python run_backtest.py AAPL v 90")
-        print("  python run_backtest.py NVDA m 2023-01-20 2023-07-20")
-        print("  python run_backtest.py TSLA m 30 15000 --no-plot --save")
+        print("  python run_backtest.py TSLA m              # TSLA momentum, default 5 years")
+        print("  python run_backtest.py AAPL v              # AAPL value, default 10 years")
+        print("  python run_backtest.py NVDA m 1095         # NVDA momentum, 3 years")
+        print("  python run_backtest.py MSFT v 2015-01-01 2024-12-31  # Custom date range")
+        print("  python run_backtest.py TSLA m 1825 15000 --no-plot --save  # 5 years, custom cash")
         print("\nStrategy: m/momentum or v/value")
-        print("Period: number of days OR start-date end-date")
+        print("Period: [optional] number of days OR start-date end-date (uses strategy default if omitted)")
         print("Flags: --plot (force plot), --no-plot (disable plot), --save (save results)")
         print("Note: Plots are shown by default for single backtests")
         return 1
@@ -79,9 +128,22 @@ def main():
         print("Strategy must be 'm'/'momentum' or 'v'/'value'")
         return 1
     
-    # Parse period (might consume 1 or 2 arguments)
+    # Parse period (might consume 0, 1, or 2 arguments)
     try:
-        start_date, end_date, args_consumed = parse_period(sys.argv[3], sys.argv[4] if len(sys.argv) > 4 else None)
+        period_arg = sys.argv[3] if len(sys.argv) > 3 and not sys.argv[3].startswith('--') else None
+        next_arg = sys.argv[4] if len(sys.argv) > 4 and not sys.argv[4].startswith('--') else None
+        
+        # Check if period_arg looks like a number or date
+        if period_arg and not period_arg.replace('.', '').isdigit():
+            # Might be a date, check if it's a flag
+            try:
+                datetime.strptime(period_arg, "%Y-%m-%d")
+                # It's a date, proceed normally
+            except ValueError:
+                # Not a date, might be cash or flag, treat as no period
+                period_arg = None
+        
+        start_date, end_date, args_consumed = parse_period(period_arg, next_arg, strategy)
     except (ValueError, IndexError) as e:
         print(f"Period error: {e}")
         return 1
@@ -104,8 +166,11 @@ def main():
     save_results = '--save' in remaining_args[cash_idx:]
     
     # Display configuration
+    period_days = (end_date - start_date).days
+    period_years = period_days / 365.25
+    default_indicator = " (strategy default)" if args_consumed == 0 else ""
     print(f"Orthrus Backtest")
-    print(f"{ticker} | {strategy.upper()} | {start_date.date()} to {end_date.date()} | ${initial_cash:,.0f}")
+    print(f"{ticker} | {strategy.upper()} | {start_date.date()} to {end_date.date()} ({period_years:.1f} years{default_indicator}) | ${initial_cash:,.0f}")
     
     try:
         # Run backtest
