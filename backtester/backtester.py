@@ -865,6 +865,18 @@ class AlpacaBacktester:
         else:
             buy_hold_return = 0
         
+        # Calculate dollar-based alpha for more accurate representation
+        # This shows the actual dollar difference in gains
+        buy_hold_final_value = self.initial_cash * (1 + buy_hold_return / 100)
+        strategy_gain = final_portfolio_value - self.initial_cash
+        buy_hold_gain = buy_hold_final_value - self.initial_cash
+        dollar_alpha = strategy_gain - buy_hold_gain
+        
+        # Calculate percentage-based alpha (relative to initial capital)
+        # This shows how much better/worse the strategy performed as a % of initial investment
+        pct_point_alpha = total_return - buy_hold_return
+        relative_alpha = (dollar_alpha / self.initial_cash) * 100
+        
         results = {
             'ticker': self.ticker,
             'strategy': self.strategy,
@@ -876,7 +888,11 @@ class AlpacaBacktester:
             'final_shares': self.shares,
             'total_return_pct': total_return,
             'buy_hold_return_pct': buy_hold_return,
-            'alpha': total_return - buy_hold_return,
+            'alpha': pct_point_alpha,  # Keep for backward compatibility
+            'dollar_alpha': dollar_alpha,  # New: actual dollar difference
+            'relative_alpha': relative_alpha,  # New: alpha as % of initial capital
+            'strategy_gain': strategy_gain,  # New: total $ gained by strategy
+            'buy_hold_gain': buy_hold_gain,  # New: total $ gained by buy-hold
             'num_trades': len(self.trade_log),
             'portfolio_history': self.portfolio_history,
             'trade_log': self.trade_log,
@@ -903,7 +919,14 @@ class AlpacaBacktester:
         print()
         print(f"Strategy Return: {results['total_return_pct']:+.2f}%")
         print(f"Buy & Hold Return: {results['buy_hold_return_pct']:+.2f}%")
-        print(f"Alpha (Outperformance): {results['alpha']:+.2f}%")
+        print(f"Alpha (Percentage Points): {results['alpha']:+.2f}%")
+        print()
+        print(f"Dollar Performance:")
+        print(f"   Strategy Gain: ${results['strategy_gain']:+,.2f}")
+        print(f"   Buy-Hold Gain: ${results['buy_hold_gain']:+,.2f}")
+        print(f"   Dollar Alpha: ${results['dollar_alpha']:+,.2f}")
+        print(f"   Relative Alpha: {results['relative_alpha']:+.2f}% of initial capital")
+        print()
         print(f"Number of Trades: {results['num_trades']}")
         
         # Market regime information

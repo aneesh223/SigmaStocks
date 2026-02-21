@@ -126,7 +126,7 @@ def select_random_parameters(use_optimal_periods=False):
 
 def run_backtest(ticker, strategy, start_date, end_date, description="", print_header=True):
     """Run a single backtest and capture results"""
-    cmd = ['python3', 'backtester/run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
+    cmd = ['python3', 'run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
     
     if print_header:
         print(f"\n{'='*80}")
@@ -144,6 +144,10 @@ def run_backtest(ticker, strategy, start_date, end_date, description="", print_h
             strategy_return = None
             buy_hold_return = None
             alpha = None
+            dollar_alpha = None
+            relative_alpha = None
+            strategy_gain = None
+            buy_hold_gain = None
             trades = None
             regime = None
             
@@ -152,8 +156,16 @@ def run_backtest(ticker, strategy, start_date, end_date, description="", print_h
                     strategy_return = line.split(":")[1].strip()
                 elif "Buy & Hold Return:" in line:
                     buy_hold_return = line.split(":")[1].strip()
-                elif "Alpha (Outperformance):" in line:
+                elif "Alpha (Percentage Points):" in line:
                     alpha = line.split(":")[1].strip()
+                elif "Dollar Alpha:" in line:
+                    dollar_alpha = line.split(":")[1].strip()
+                elif "Relative Alpha:" in line:
+                    relative_alpha = line.split(":")[1].strip().split()[0]  # Get just the percentage
+                elif "Strategy Gain:" in line:
+                    strategy_gain = line.split(":")[1].strip()
+                elif "Buy-Hold Gain:" in line:
+                    buy_hold_gain = line.split(":")[1].strip()
                 elif "Number of Trades:" in line:
                     trades = line.split(":")[1].strip()
                 elif "Initial Regime:" in line:
@@ -164,6 +176,10 @@ def run_backtest(ticker, strategy, start_date, end_date, description="", print_h
                 'strategy_return': strategy_return,
                 'buy_hold_return': buy_hold_return,
                 'alpha': alpha,
+                'dollar_alpha': dollar_alpha,
+                'relative_alpha': relative_alpha,
+                'strategy_gain': strategy_gain,
+                'buy_hold_gain': buy_hold_gain,
                 'trades': trades,
                 'regime': regime,
                 'ticker': ticker,
@@ -308,15 +324,20 @@ def main():
             
             for result in cat_results:
                 alpha_color = "🟢" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) > 0 else "🔴" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) < -5 else "🟡"
-                print(f"{alpha_color} {result['ticker']} {result['strategy']}: {result['alpha']} alpha | {result['trades']} trades | {result['regime']}")
-                print(f"   Strategy: {result['strategy_return']} vs Buy-Hold: {result['buy_hold_return']}")
+                dollar_alpha_str = result.get('dollar_alpha', 'N/A')
+                print(f"{alpha_color} {result['ticker']} {result['strategy']}: {result['alpha']} alpha ({dollar_alpha_str} $) | {result['trades']} trades | {result['regime']}")
+                print(f"   Strategy: {result['strategy_return']} ({result.get('strategy_gain', 'N/A')}) vs Buy-Hold: {result['buy_hold_return']} ({result.get('buy_hold_gain', 'N/A')})")
                 print(f"   Period: {result['period']}")
                 print()
         
         # Calculate overall statistics
         alphas = []
+        dollar_alphas = []
+        relative_alphas = []
         momentum_alphas = []
         value_alphas = []
+        momentum_dollar_alphas = []
+        value_dollar_alphas = []
         
         for result in successful_results:
             if result['alpha']:
@@ -330,6 +351,27 @@ def main():
                         value_alphas.append(alpha_val)
                 except:
                     pass
+            
+            # Parse dollar alpha
+            if result.get('dollar_alpha'):
+                try:
+                    dollar_val = float(result['dollar_alpha'].replace('$', '').replace(',', '').replace('+', ''))
+                    dollar_alphas.append(dollar_val)
+                    
+                    if result['strategy'] == 'M':
+                        momentum_dollar_alphas.append(dollar_val)
+                    else:
+                        value_dollar_alphas.append(dollar_val)
+                except:
+                    pass
+            
+            # Parse relative alpha
+            if result.get('relative_alpha'):
+                try:
+                    rel_val = float(result['relative_alpha'].replace('%', '').replace('+', ''))
+                    relative_alphas.append(rel_val)
+                except:
+                    pass
         
         if alphas:
             avg_alpha = sum(alphas) / len(alphas)
@@ -338,17 +380,28 @@ def main():
             
             print(f"\nOVERALL STATISTICS")
             print("-" * 40)
-            print(f"Average Alpha: {avg_alpha:+.2f}%")
+            print(f"Average Alpha (Percentage Points): {avg_alpha:+.2f}%")
+            
+            if dollar_alphas:
+                avg_dollar_alpha = sum(dollar_alphas) / len(dollar_alphas)
+                print(f"Average Dollar Alpha: ${avg_dollar_alpha:+,.2f}")
+            
+            if relative_alphas:
+                avg_relative_alpha = sum(relative_alphas) / len(relative_alphas)
+                print(f"Average Relative Alpha: {avg_relative_alpha:+.2f}% of initial capital")
+            
             print(f"Positive Alpha: {positive_alpha_count}/{len(alphas)} ({positive_alpha_count/len(alphas)*100:.1f}%)")
             print(f"Near Buy-Hold (±2%): {near_zero_count}/{len(alphas)} ({near_zero_count/len(alphas)*100:.1f}%)")
             
             if momentum_alphas:
                 momentum_avg = sum(momentum_alphas) / len(momentum_alphas)
-                print(f"Momentum Strategy Avg: {momentum_avg:+.2f}% ({len(momentum_alphas)} tests)")
+                momentum_dollar_avg = sum(momentum_dollar_alphas) / len(momentum_dollar_alphas) if momentum_dollar_alphas else 0
+                print(f"Momentum Strategy Avg: {momentum_avg:+.2f}% (${momentum_dollar_avg:+,.2f}) ({len(momentum_alphas)} tests)")
             
             if value_alphas:
                 value_avg = sum(value_alphas) / len(value_alphas)
-                print(f"Value Strategy Avg: {value_avg:+.2f}% ({len(value_alphas)} tests)")
+                value_dollar_avg = sum(value_dollar_alphas) / len(value_dollar_alphas) if value_dollar_alphas else 0
+                print(f"Value Strategy Avg: {value_avg:+.2f}% (${value_dollar_avg:+,.2f}) ({len(value_alphas)} tests)")
     
     print(f"\n{'='*80}")
     print("TIP: Run with --seed <number> for reproducible results")
