@@ -793,6 +793,36 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
             logger.debug(f"Sentiment override: {recent_sentiment:.2f} sentiment overrides {market_regime}")
             market_regime = "BULL"
     
+    # Microstructure Choppiness Override (CNN-Validated Regimes)
+    # This distinguishes "Smart Money Accumulation" from "Dead Market Chop"
+    cnn_override_applied = False
+    cnn_penalty_applied = False
+    if market_regime in CHOPPY_REGIMES:
+        try:
+            from src.microstructure import analyze_liquidity
+            
+            # Get CNN analysis of order book microstructure
+            micro_result = analyze_liquidity(ticker)
+            micro_score = micro_result.get('anomaly_score', 0.5)
+            
+            # Only apply if high confidence (not fallback)
+            if micro_result.get('confidence') == 'high':
+                if micro_score < 0.25:
+                    # Accumulation detected - this is a coiled spring, not chop
+                    # Override to BULL regime
+                    original_regime = market_regime
+                    market_regime = "BULL"
+                    cnn_override_applied = True
+                    logger.info(f"CNN OVERRIDE for {ticker}: {original_regime} -> BULL (accumulation score: {micro_score:.3f})")
+                elif micro_score > 0.75:
+                    # Liquidity void - highly dangerous chop
+                    # Keep as CHOPPY but will reduce confidence later
+                    cnn_penalty_applied = True
+                    logger.info(f"CNN PENALTY for {ticker}: {market_regime} with thin liquidity (void score: {micro_score:.3f})")
+        except Exception as e:
+            # Fail gracefully - respect original math if CNN fails
+            logger.debug(f"CNN validation failed for {ticker}, using standard regime: {e}")
+    
     # OPTIMIZATION V8: Sentiment-Price Divergence Detection (FIX SENTIMENT LAG)
     # Detect when price is leading sentiment - this is the #1 fix for bull markets
     divergence_detected = False
@@ -975,6 +1005,17 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
     
     # Apply conviction to confidence
     confidence = min(100, confidence * conviction_score)
+    
+    # Apply CNN penalty if liquidity void was detected in choppy market
+    if cnn_penalty_applied:
+        original_confidence = confidence
+        confidence *= 0.8  # 20% penalty
+        reasoning += " [CNN PENALTY: Choppy market with thin liquidity]"
+        logger.info(f"CNN penalty applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f}")
+    
+    # Apply CNN override reasoning if accumulation was detected
+    if cnn_override_applied:
+        reasoning += " [CNN OVERRIDE: Sideways action validated as Accumulation]"
     
     # Apply microstructure adjustment (real-time only - requires intraday data)
     microstructure_applied = False
