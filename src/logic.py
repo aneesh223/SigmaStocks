@@ -184,6 +184,21 @@ def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
     if len(returns) < 5:
         return {'is_choppy': False, 'choppiness_score': 0.0, 'reason': 'Insufficient returns data'}
     
+    # OPTIMIZATION V10: Check for hidden trend first
+    # Even if market is volatile, if there's a clear directional bias, it's trending
+    net_return = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+    
+    # If net return > 10% despite choppiness, it's a trend not chop
+    if abs(net_return) > 0.10:
+        return {
+            'is_choppy': False,
+            'is_very_choppy': False,
+            'choppiness_score': 0.0,
+            'directional_index': abs(net_return),
+            'net_return': net_return,
+            'reason': f"Hidden trend detected: {net_return:.1%} net return overrides choppiness"
+        }
+    
     # Directional movement calculation
     up_moves = returns[returns > 0].sum()
     down_moves = abs(returns[returns < 0].sum())
@@ -199,7 +214,6 @@ def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
     
     # Volatility vs trend analysis
     volatility = returns.std() * (252 ** 0.5)
-    net_return = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
     efficiency_ratio = abs(net_return) / volatility if volatility > 0 else 0
     
     # Consecutive reversals using vectorized operations
@@ -250,6 +264,7 @@ def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
         'efficiency_ratio': efficiency_ratio,
         'reversal_rate': reversal_rate,
         'price_range': price_range,
+        'net_return': net_return,
         'factors': choppiness_factors,
         'reason': reason
     }
@@ -324,44 +339,18 @@ def detect_market_regime(ticker: str = None, price_data: pd.DataFrame = None, lo
     is_choppy = choppy_analysis['is_choppy']
     is_very_choppy = choppy_analysis['is_very_choppy']
     
-    # OPTIMIZATION V9: Strong trend override for choppy markets
-    # Fix regime misclassification - some "choppy" markets actually trend strongly
-    # V9.1: Lowered threshold from 15% to 8% for earlier trend detection
+    # Choppiness override for early bull transitions
     choppy_override = False
     if (is_choppy or is_very_choppy):
-        # Check for strong trending behavior (lowered from 15% to 8%)
-        if total_return > 0.08 and trend_persistence:
+        if medium_term_return > 0.05 and trend_persistence and recent_momentum > 0.02:
             choppy_override = True
-            logger.debug(f"Strong uptrend override: +{total_return:.1%} return overrides CHOPPY → BULL")
-        elif total_return < -0.08 and not trend_persistence:
-            choppy_override = True
-            logger.debug(f"Strong downtrend override: {total_return:.1%} return overrides CHOPPY → BEAR")
-        # Early bull transition detection (existing logic)
-        elif medium_term_return > 0.05 and trend_persistence and recent_momentum > 0.02:
-            choppy_override = True
-            logger.debug(f"Early bull transition: medium-term momentum +{medium_term_return:.1%}")
+            logger.debug(f"Choppiness override: medium-term momentum +{medium_term_return:.1%}")
     
     # Apply choppiness classification
     if is_very_choppy and not choppy_override:
         return "CHOPPY_SIDEWAYS"
     elif is_choppy and not choppy_override:
         return "CHOPPY"
-    
-    # OPTIMIZATION V9: If choppy was overridden, classify based on trend direction
-    if choppy_override:
-        if total_return > 0.08:  # Lowered from 0.15
-            # Strong uptrend - classify as BULL or STRONG_BULL
-            if total_return > 0.20 and recent_momentum > 0.05:  # Lowered from 0.25
-                return "STRONG_BULL"
-            else:
-                return "BULL"
-        elif total_return < -0.08:  # Lowered from -0.15
-            # Strong downtrend - classify as BEAR or STRONG_BEAR
-            if total_return < -0.20 and recent_momentum < -0.05:  # Lowered from -0.25
-                return "STRONG_BEAR"
-            else:
-                return "BEAR"
-        # If override was due to early transition, continue to normal classification
     
     # Volatility override for extreme cases
     extreme_volatility_threshold = 1.2
