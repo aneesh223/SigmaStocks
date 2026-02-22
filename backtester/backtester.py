@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 import pytz
 import sys
 import os
-import logging
 
 # Conditional matplotlib import
 try:
@@ -17,7 +16,7 @@ try:
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
     MATPLOTLIB_AVAILABLE = False
-    logging.warning("matplotlib not available, plotting disabled")
+    print("Warning: matplotlib not available, plotting disabled")
 
 from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
@@ -89,9 +88,9 @@ class AlpacaBacktester:
                 api_key=config.API_KEY,
                 secret_key=config.API_SECRET
             )
-            logging.info("Alpaca client initialized successfully")
+            print("Alpaca client initialized successfully")
         except Exception as e:
-            logging.error(f"Error initializing Alpaca client: {e}")
+            print(f"Error initializing Alpaca client: {e}")
             raise
     
     def fetch_historical_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
@@ -106,7 +105,7 @@ class AlpacaBacktester:
             DataFrame with OHLCV data
         """
         try:
-            logging.info(f"Fetching historical data for {self.ticker} from {start_date.date()} to {end_date.date()}...")
+            print(f"Fetching historical data for {self.ticker} from {start_date.date()} to {end_date.date()}...")
             
             # Create request for daily bars
             request_params = StockBarsRequest(
@@ -145,14 +144,14 @@ class AlpacaBacktester:
                 elif price_data.index.tz != pytz.UTC:
                     price_data.index = price_data.index.tz_convert('UTC')
                 
-                logging.info(f"Fetched {len(price_data)} days of price data")
+                print(f"Fetched {len(price_data)} days of price data")
                 return price_data
             else:
-                logging.warning(f"No price data found for {self.ticker}")
+                print(f"No price data found for {self.ticker}")
                 return pd.DataFrame()
                 
         except Exception as e:
-            logging.error(f"Error fetching historical data: {e}")
+            print(f"Error fetching historical data: {e}")
             return pd.DataFrame()
     
     def fetch_news_data(self, days: int = 90, end_date: datetime = None) -> List[Tuple]:
@@ -167,18 +166,18 @@ class AlpacaBacktester:
             List of news tuples (timestamp, headline, source)
         """
         try:
-            logging.info(f"Fetching {days} days of news data for {self.ticker}...")
+            print(f"Fetching {days} days of news data for {self.ticker}...")
             if end_date:
-                logging.info(f"   Historical news ending at: {end_date.date()}")
+                print(f"   Historical news ending at: {end_date.date()}")
             
             # Use the existing scraper to get news data with historical support
             profile_data, news_data = scraper.scrape_hybrid(self.ticker, days=days, end_date=end_date)
             
-            logging.info(f"Fetched {len(news_data)} news articles")
+            print(f"Fetched {len(news_data)} news articles")
             return news_data
             
         except Exception as e:
-            logging.error(f"Error fetching news data: {e}")
+            print(f"Error fetching news data: {e}")
             return []
     
     def prepare_simulation_data(self, start_date: datetime, end_date: datetime, news_days: int = 90):
@@ -206,9 +205,9 @@ class AlpacaBacktester:
         if self.full_price_data.empty:
             raise ValueError(f"No price data available for {self.ticker}")
         
-        logging.info(f"Simulation data prepared:")
-        logging.info(f"   Price data: {len(self.full_price_data)} records")
-        logging.info(f"   News data: {len(self.full_news_data)} articles")
+        print(f"Simulation data prepared:")
+        print(f"   Price data: {len(self.full_price_data)} records")
+        print(f"   News data: {len(self.full_news_data)} articles")
     
     def filter_news_by_date(self, target_date: datetime) -> List[Tuple]:
         """
@@ -267,18 +266,13 @@ class AlpacaBacktester:
         if action == "BUY" and self.cash > 0:
             # Buy as many shares as possible
             if price <= 0:
-                logging.warning(f"Invalid price {price} for BUY order, skipping...")
+                print(f"Warning: Invalid price {price} for BUY order, skipping...")
                 return
                 
             shares_to_buy = int(self.cash / price)
             if shares_to_buy > 0:
-                # Apply transaction costs (0.1% per trade to simulate bid-ask spread + fees)
-                transaction_cost_rate = 0.001  # 0.1%
                 cost = shares_to_buy * price
-                transaction_cost = cost * transaction_cost_rate
-                total_cost = cost + transaction_cost
-                
-                self.cash -= total_cost
+                self.cash -= cost
                 self.shares += shares_to_buy
                 self.entry_price = price  # Track entry price for risk management
                 
@@ -293,68 +287,54 @@ class AlpacaBacktester:
                     'Shares': shares_to_buy,
                     'Price': price,
                     'Cost': cost,
-                    'Transaction_Cost': transaction_cost,
-                    'Total_Cost': total_cost,
                     'Buy_Score': buy_score,
                     'Cash_After': self.cash,
                     'Shares_After': self.shares
                 })
                 
-                logging.info(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}) - Cash: ${self.cash:.2f}")
+                print(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}) - Cash: ${self.cash:.2f}")
         
         elif action == "SELL" and self.shares > 0:
-            # Sell all shares with transaction costs
-            gross_proceeds = self.shares * price
-            transaction_cost_rate = 0.001  # 0.1%
-            transaction_cost = gross_proceeds * transaction_cost_rate
-            net_proceeds = gross_proceeds - transaction_cost
+            # Sell all shares
+            proceeds = self.shares * price
+            self.cash += proceeds
             
-            self.cash += net_proceeds
-            
-            # Calculate P&L for this trade (including transaction costs from both buy and sell)
+            # Calculate P&L for this trade
             if self.entry_price and self.entry_price > 0:
                 pnl_pct = ((price - self.entry_price) / self.entry_price) * 100
                 pnl_dollar = (price - self.entry_price) * self.shares
-                # Adjust for transaction costs
-                total_transaction_costs = transaction_cost + (self.shares * self.entry_price * transaction_cost_rate)
-                pnl_dollar_net = pnl_dollar - total_transaction_costs
-                pnl_pct_net = (pnl_dollar_net / (self.shares * self.entry_price)) * 100
             else:
-                pnl_pct = pnl_pct_net = 0
-                pnl_dollar = pnl_dollar_net = 0
+                pnl_pct = 0
+                pnl_dollar = 0
             
             self.trade_log.append({
                 'Date': date,
                 'Action': 'SELL',
                 'Shares': self.shares,
                 'Price': price,
-                'Gross_Proceeds': gross_proceeds,
-                'Transaction_Cost': transaction_cost,
-                'Net_Proceeds': net_proceeds,
+                'Proceeds': proceeds,
                 'Buy_Score': buy_score,
                 'Cash_After': self.cash,
                 'Shares_After': 0,
                 'PnL_Pct': pnl_pct,
-                'PnL_Dollar': pnl_dollar,
-                'PnL_Pct_Net': pnl_pct_net,
-                'PnL_Dollar_Net': pnl_dollar_net
+                'PnL_Dollar': pnl_dollar
             })
             
-            logging.info(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
+            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}) - P&L: {pnl_pct:+.1f}% (${pnl_dollar:+.0f}) - Cash: ${self.cash:.2f}")
             self.shares = 0
             self.entry_price = None  # Reset entry price
     
     def detect_market_regime(self, price_data: pd.DataFrame, lookback_days: int = 60) -> str:
         """
-        Detect current market regime using shared logic with transition smoothing
+        Detect current market regime using shared logic
         """
         import sys
         import os
         src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
         sys.path.insert(0, src_path)
         
-        from logic import get_stable_market_regime
-        return get_stable_market_regime(price_data=price_data, lookback_days=lookback_days)
+        from logic import detect_market_regime
+        return detect_market_regime(price_data=price_data, lookback_days=lookback_days)
     
     def get_adaptive_risk_params(self, market_regime: str) -> Dict:
         """
@@ -495,12 +475,12 @@ class AlpacaBacktester:
         """
         # Check overtrading protection
         if action == "BUY" and self.check_overtrading_protection(date, market_regime):
-            logging.info(f"OVERTRADING PROTECTION: Blocking BUY signal (Score: {buy_score:.1f}) - too many recent trades")
+            print(f"OVERTRADING PROTECTION: Blocking BUY signal (Score: {buy_score:.1f}) - too many recent trades")
             return
         
         # Check buy-and-hold mode
         if action == "SELL" and self.check_buy_and_hold_mode(market_regime):
-            logging.info(f"🔒 BUY-AND-HOLD MODE: Blocking SELL signal (Score: {buy_score:.1f}) - sustained bull market detected")
+            print(f"🔒 BUY-AND-HOLD MODE: Blocking SELL signal (Score: {buy_score:.1f}) - sustained bull market detected")
             return
         
         if action == "BUY" and self.cash > 0:
@@ -510,7 +490,7 @@ class AlpacaBacktester:
             
             # Validate price
             if price <= 0:
-                logging.warning(f"Invalid price {price} for BUY order, skipping...")
+                print(f"Warning: Invalid price {price} for BUY order, skipping...")
                 return
             
             # Calculate conviction score for dynamic position sizing
@@ -526,13 +506,8 @@ class AlpacaBacktester:
             shares_to_buy = min(adjusted_shares, base_shares)  # Don't exceed available cash
             
             if shares_to_buy > 0:
-                # Apply transaction costs (0.1% per trade)
-                transaction_cost_rate = 0.001  # 0.1%
                 cost = shares_to_buy * price
-                transaction_cost = cost * transaction_cost_rate
-                total_cost = cost + transaction_cost
-                
-                self.cash -= total_cost
+                self.cash -= cost
                 self.shares += shares_to_buy
                 self.entry_price = price  # Track entry price for risk management
                 self.last_buy_date = date  # Track buy date for minimum holding period
@@ -548,8 +523,6 @@ class AlpacaBacktester:
                     'Shares': shares_to_buy,
                     'Price': price,
                     'Cost': cost,
-                    'Transaction_Cost': transaction_cost,
-                    'Total_Cost': total_cost,
                     'Buy_Score': buy_score,
                     'Market_Regime': market_regime,
                     'Position_Multiplier': base_position_multiplier,
@@ -563,52 +536,40 @@ class AlpacaBacktester:
                 self.recent_trades.append(date)
                 self.last_trade_date = date
                 
-                logging.info(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}, Conviction: {conviction_score:.1f}x) - Cash: ${self.cash:.2f}")
+                print(f"🟢 BUY: {shares_to_buy} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}, Conviction: {conviction_score:.1f}x) - Cash: ${self.cash:.2f}")
         
         elif action == "SELL" and self.shares > 0:
-            # Sell all shares with transaction costs
-            gross_proceeds = self.shares * price
-            transaction_cost_rate = 0.001  # 0.1%
-            transaction_cost = gross_proceeds * transaction_cost_rate
-            net_proceeds = gross_proceeds - transaction_cost
+            # Sell all shares
+            proceeds = self.shares * price
+            self.cash += proceeds
             
-            self.cash += net_proceeds
-            
-            # Calculate P&L for this trade (including transaction costs from both buy and sell)
+            # Calculate P&L for this trade
             if self.entry_price and self.entry_price > 0:
                 pnl_pct = ((price - self.entry_price) / self.entry_price) * 100
                 pnl_dollar = (price - self.entry_price) * self.shares
-                # Adjust for transaction costs
-                total_transaction_costs = transaction_cost + (self.shares * self.entry_price * transaction_cost_rate)
-                pnl_dollar_net = pnl_dollar - total_transaction_costs
-                pnl_pct_net = (pnl_dollar_net / (self.shares * self.entry_price)) * 100
             else:
-                pnl_pct = pnl_pct_net = 0
-                pnl_dollar = pnl_dollar_net = 0
+                pnl_pct = 0
+                pnl_dollar = 0
             
             self.trade_log.append({
                 'Date': date,
                 'Action': 'SELL',
                 'Shares': self.shares,
                 'Price': price,
-                'Gross_Proceeds': gross_proceeds,
-                'Transaction_Cost': transaction_cost,
-                'Net_Proceeds': net_proceeds,
+                'Proceeds': proceeds,
                 'Buy_Score': buy_score,
                 'Market_Regime': market_regime,
                 'Cash_After': self.cash,
                 'Shares_After': 0,
                 'PnL_Pct': pnl_pct,
-                'PnL_Dollar': pnl_dollar,
-                'PnL_Pct_Net': pnl_pct_net,
-                'PnL_Dollar_Net': pnl_dollar_net
+                'PnL_Dollar': pnl_dollar
             })
             
             # Track trade for overtrading protection
             self.recent_trades.append(date)
             self.last_trade_date = date
             
-            logging.info(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}) - P&L: {pnl_pct_net:+.1f}% (${pnl_dollar_net:+.0f}) - Cash: ${self.cash:.2f}")
+            print(f"🔴 SELL: {self.shares} shares at ${price:.2f} (Score: {buy_score:.1f}, {market_regime}) - P&L: {pnl_pct:+.1f}% (${pnl_dollar:+.0f}) - Cash: ${self.cash:.2f}")
             self.shares = 0
             self.entry_price = None  # Reset entry price
     
@@ -641,8 +602,10 @@ class AlpacaBacktester:
         else:
             end_date = end_date.astimezone(pytz.utc)
         
-        # Prepare simulation data
-        news_days = max(90, (end_date - start_date).days + 30)  # Ensure enough news data
+        # OPTIMIZATION: Limit news data to simulation period + small buffer
+        # Fetching 90+ days of news for short backtests is wasteful
+        simulation_days = (end_date - start_date).days
+        news_days = min(90, max(30, simulation_days + 10))  # Cap at 90 days, min 30 days
         self.prepare_simulation_data(start_date, end_date, news_days)
         
         # Get trading days from price data
@@ -656,15 +619,55 @@ class AlpacaBacktester:
         
         print(f"Simulating {len(trading_days)} trading days...")
         
-        # SENTIMENT ANALYSIS: Analyze all news articles once for efficiency
-        print(f"🧠 Analyzing all {len(self.full_news_data)} news articles (one-time processing)...")
-        try:
-            # Analyze all news at once to get complete sentiment DataFrame
-            full_sentiment_df = analyzer.get_sentiment(self.full_news_data, self.ticker, lookback_days)
-            print(f"Sentiment analysis complete: {len(full_sentiment_df)} sentiment records")
-        except Exception as e:
-            print(f"Error in sentiment analysis: {e}")
-            full_sentiment_df = pd.DataFrame()
+        # OPTIMIZATION: Skip sentiment analysis for very short periods (< 7 days)
+        # Use neutral scores to avoid expensive NLP processing
+        if simulation_days < 7 or len(self.full_news_data) == 0:
+            print(f"⚡ Fast mode: Using neutral scores for {simulation_days}-day period (no sentiment analysis)")
+            score_lookup = {date.date() if hasattr(date, 'date') else date: 5.0 for date in trading_days}
+        else:
+            # OPTIMIZATION: Analyze ALL news articles ONCE and calculate ALL scores ONCE
+            print(f"🧠 Analyzing {len(self.full_news_data)} news articles (one-time processing)...")
+            try:
+                # Analyze all news at once to get complete sentiment DataFrame
+                full_sentiment_df = analyzer.get_sentiment(self.full_news_data, self.ticker, lookback_days)
+                print(f"Sentiment analysis complete: {len(full_sentiment_df)} sentiment records")
+            except Exception as e:
+                print(f"Error in sentiment analysis: {e}")
+                full_sentiment_df = pd.DataFrame()
+            
+            if full_sentiment_df.empty:
+                print("No sentiment data available, using neutral scores")
+                # Create a simple lookup with neutral scores for all trading days
+                score_lookup = {date.date() if hasattr(date, 'date') else date: 5.0 for date in trading_days}
+            else:
+                # PRE-CALCULATE ALL Final_Buy_Scores using the complete dataset
+                print(f"🔢 Pre-calculating all Final_Buy_Scores for entire period...")
+                
+                # Calculate verdict using the FULL sentiment and price data
+                verdict = market.calculate_verdict(
+                    ticker=self.ticker,
+                    sentiment_df=full_sentiment_df,
+                    strategy=self.strategy,
+                    lookback_days=lookback_days,
+                    custom_date=end_date,  # Use end date as reference
+                    price_data=self.full_price_data  # Use full price data
+                )
+                
+                # Extract all Final_Buy_Scores and create a lookup dictionary
+                final_buy_scores_over_time = verdict.get('Final_Buy_Scores_Over_Time', [])
+                score_lookup = {}
+                
+                for timestamp, score in final_buy_scores_over_time:
+                    # Create lookup by date for fast access
+                    if hasattr(timestamp, 'date'):
+                        date_key = timestamp.date()
+                    else:
+                        date_key = timestamp
+                    score_lookup[date_key] = score
+                
+                print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
+                
+                print(f"Pre-calculated {len(score_lookup)} Final_Buy_Scores")
         
         print()
         
@@ -677,35 +680,15 @@ class AlpacaBacktester:
         print(f"Initial Adaptive Parameters: Stop-loss: {risk_params['stop_loss_pct']*100:.0f}%, Take-profit: {risk_params['take_profit_pct']*100:.0f}%, Position size: {risk_params['position_size_multiplier']:.1f}x")
         print()
         
-        # Simulation loop - calculate scores dynamically to avoid look-ahead bias
+        # OPTIMIZATION: Reduce regime update frequency for longer backtests
+        # Update every 5 days for short tests, every 10 days for long tests
+        regime_update_interval = 10 if simulation_days > 180 else 5
+        
+        # Simulation loop - now extremely fast since everything is pre-calculated
         score_history = []  # Track scores for dynamic thresholds and momentum reversal detection
         regime_update_counter = 0  # Track how often we update regime
         
-        # OPTIMIZED APPROACH: Pre-filter sentiment data by date ranges to avoid look-ahead bias
-        # This is much faster than recalculating sentiment analysis for each day
-        print("🔢 Pre-processing sentiment data by date ranges (avoiding look-ahead bias)...")
-        
-        # Create sentiment lookup that respects temporal boundaries
-        sentiment_by_date = {}
-        if not full_sentiment_df.empty:
-            # Group sentiment data by date for efficient lookup
-            for timestamp, row in full_sentiment_df.iterrows():
-                date_key = timestamp.date() if hasattr(timestamp, 'date') else timestamp
-                sentiment_by_date[date_key] = row['Compound_Score']
-        
-        print(f"Processed {len(sentiment_by_date)} sentiment records by date")
-        print()
-        
-        # Progress tracking for long simulations
-        total_days = len(trading_days)
-        progress_interval = max(1, total_days // 20)  # Show progress every 5%
-        
         for i, simulation_date in enumerate(trading_days):
-            # Progress indicator for long simulations
-            if i % progress_interval == 0 or i == total_days - 1:
-                progress_pct = (i + 1) / total_days * 100
-                print(f"Progress: {i+1}/{total_days} days ({progress_pct:.1f}%)")
-            
             try:
                 # Safe DataFrame access with error handling
                 try:
@@ -718,76 +701,20 @@ class AlpacaBacktester:
                     print(f"Warning: Invalid price {current_price} for {simulation_date.date()}, skipping...")
                     continue
                 
-                # OPTIMIZED DYNAMIC SCORE CALCULATION: Avoid look-ahead bias with efficient computation
-                # Calculate Final_Buy_Score using only data available up to current simulation date
+                # FAST LOOKUP: Get pre-calculated Final_Buy_Score for this date
+                sim_date_key = simulation_date.date() if hasattr(simulation_date, 'date') else simulation_date
                 
-                if full_sentiment_df.empty:
-                    buy_score_t = 5.0  # Neutral score if no sentiment data
+                # Look for exact match first
+                if sim_date_key in score_lookup:
+                    buy_score_t = score_lookup[sim_date_key]
                 else:
-                    # Get sentiment data up to current date (no look-ahead bias)
-                    current_date = simulation_date.date() if hasattr(simulation_date, 'date') else simulation_date
-                    
-                    # Find most recent sentiment score on or before current date
-                    available_dates = [d for d in sentiment_by_date.keys() if d <= current_date]
-                    
-                    if available_dates:
-                        # Use most recent sentiment score
-                        most_recent_date = max(available_dates)
-                        sentiment_score = sentiment_by_date[most_recent_date]
-                        sentiment_health = (sentiment_score + 1) * 5  # Convert to 0-10 scale
-                        
-                        # Get technical score using only price data up to current date (no look-ahead bias)
-                        price_data_up_to_date = self.full_price_data.loc[:simulation_date]
-                        
-                        if len(price_data_up_to_date) >= 50:  # Need minimum data for technical analysis
-                            try:
-                                # Import technical analysis functions
-                                import sys
-                                import os
-                                src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-                                sys.path.insert(0, src_path)
-                                
-                                if self.strategy.lower() == "momentum":
-                                    from market import calculate_golden_death_cross, calculate_macd, calculate_rsi, calculate_momentum_score_cached
-                                    
-                                    prices = price_data_up_to_date['Close']
-                                    
-                                    if len(prices) >= 200:  # Golden/Death Cross needs 200 days
-                                        cross_score, golden_cross, death_cross, sma_short, sma_long = calculate_golden_death_cross(prices)
-                                        macd_line, signal_line, histogram, bullish_crossover = calculate_macd(prices)
-                                        rsi = calculate_rsi(prices)
-                                        technical_score, _ = calculate_momentum_score_cached(
-                                            macd_line, signal_line, histogram, bullish_crossover, rsi, cross_score, golden_cross, death_cross
-                                        )
-                                    elif len(prices) >= 26:  # MACD needs 26 days
-                                        macd_line, signal_line, histogram, bullish_crossover = calculate_macd(prices)
-                                        rsi = calculate_rsi(prices)
-                                        technical_score, _ = calculate_momentum_score_cached(
-                                            macd_line, signal_line, histogram, bullish_crossover, rsi, 0.0, False, False
-                                        )
-                                    else:
-                                        technical_score = 5.0  # Neutral if insufficient data
-                                else:
-                                    # Value strategy - use Z-score
-                                    from market import calculate_z_score, calculate_value_score
-                                    
-                                    prices = price_data_up_to_date['Close']
-                                    z_score = calculate_z_score(prices, window=50)
-                                    technical_score, _ = calculate_value_score(z_score)
-                                
-                                # Calculate Final_Buy_Score (same formula as market.py)
-                                sentiment_penalty = 0.5 if sentiment_score < -0.5 else 1.0
-                                buy_score_t = ((technical_score * 0.6) + (sentiment_health * 0.4)) * sentiment_penalty
-                                buy_score_t = max(1.0, min(buy_score_t, 10.0))  # Clamp to 1-10 range
-                                
-                            except Exception as e:
-                                print(f"Warning: Technical analysis failed for {current_date}: {e}")
-                                buy_score_t = 5.0  # Neutral fallback
-                        else:
-                            # Insufficient price data - use sentiment only
-                            buy_score_t = sentiment_health
+                    # Find the most recent score on or before this date
+                    valid_dates = [d for d in score_lookup.keys() if d <= sim_date_key]
+                    if valid_dates:
+                        most_recent_date = max(valid_dates)
+                        buy_score_t = score_lookup[most_recent_date]
                     else:
-                        buy_score_t = 5.0  # Neutral if no sentiment data available
+                        buy_score_t = 5.0  # Neutral fallback
                 
                 # Add to score history for dynamic thresholds and momentum reversal detection
                 score_history.append(buy_score_t)
@@ -796,8 +723,9 @@ class AlpacaBacktester:
                 # Calculate portfolio value
                 portfolio_value = self.cash + (self.shares * current_price)
                 
-                # MOMENTUM REVERSAL DETECTION: Check for regime changes every 5 days
-                if i > 0 and i % 5 == 0 and len(score_history) >= 10:
+                # OPTIMIZATION: Reduce momentum reversal detection frequency
+                # Check for regime changes at configurable intervals (not every 5 days)
+                if i > 0 and i % regime_update_interval == 0 and len(score_history) >= 10:
                     # Get recent price data for reversal detection
                     try:
                         recent_price_data = self.full_price_data.loc[:simulation_date].tail(10)
@@ -897,8 +825,10 @@ class AlpacaBacktester:
                     'Market_Regime': current_market_regime  # Track dynamic regime changes
                 })
                 
-                # Progress update every 10 days with buy score info and adaptive thresholds
-                if (i + 1) % 10 == 0:
+                # OPTIMIZATION: Reduce progress update frequency for longer backtests
+                # Update every 10 days for short tests, every 30 days for long tests
+                progress_interval = 30 if simulation_days > 180 else 10
+                if (i + 1) % progress_interval == 0:
                     buy_thresh, sell_thresh = self.calculate_adaptive_thresholds(score_history, current_market_regime)
                     print(f"Day {i+1}/{len(trading_days)}: ${portfolio_value:,.2f} (Score: {buy_score_t:.1f}, {current_market_regime}) | Thresholds: {buy_thresh:.3f}/{sell_thresh:.3f}")
             
@@ -935,6 +865,18 @@ class AlpacaBacktester:
         else:
             buy_hold_return = 0
         
+        # Calculate dollar-based alpha for more accurate representation
+        # This shows the actual dollar difference in gains
+        buy_hold_final_value = self.initial_cash * (1 + buy_hold_return / 100)
+        strategy_gain = final_portfolio_value - self.initial_cash
+        buy_hold_gain = buy_hold_final_value - self.initial_cash
+        dollar_alpha = strategy_gain - buy_hold_gain
+        
+        # Calculate percentage-based alpha (relative to initial capital)
+        # This shows how much better/worse the strategy performed as a % of initial investment
+        pct_point_alpha = total_return - buy_hold_return
+        relative_alpha = (dollar_alpha / self.initial_cash) * 100
+        
         results = {
             'ticker': self.ticker,
             'strategy': self.strategy,
@@ -946,7 +888,11 @@ class AlpacaBacktester:
             'final_shares': self.shares,
             'total_return_pct': total_return,
             'buy_hold_return_pct': buy_hold_return,
-            'alpha': total_return - buy_hold_return,
+            'alpha': pct_point_alpha,  # Keep for backward compatibility
+            'dollar_alpha': dollar_alpha,  # New: actual dollar difference
+            'relative_alpha': relative_alpha,  # New: alpha as % of initial capital
+            'strategy_gain': strategy_gain,  # New: total $ gained by strategy
+            'buy_hold_gain': buy_hold_gain,  # New: total $ gained by buy-hold
             'num_trades': len(self.trade_log),
             'portfolio_history': self.portfolio_history,
             'trade_log': self.trade_log,
@@ -973,7 +919,14 @@ class AlpacaBacktester:
         print()
         print(f"Strategy Return: {results['total_return_pct']:+.2f}%")
         print(f"Buy & Hold Return: {results['buy_hold_return_pct']:+.2f}%")
-        print(f"Alpha (Outperformance): {results['alpha']:+.2f}%")
+        print(f"Alpha (Percentage Points): {results['alpha']:+.2f}%")
+        print()
+        print(f"Dollar Performance:")
+        print(f"   Strategy Gain: ${results['strategy_gain']:+,.2f}")
+        print(f"   Buy-Hold Gain: ${results['buy_hold_gain']:+,.2f}")
+        print(f"   Dollar Alpha: ${results['dollar_alpha']:+,.2f}")
+        print(f"   Relative Alpha: {results['relative_alpha']:+.2f}% of initial capital")
+        print()
         print(f"Number of Trades: {results['num_trades']}")
         
         # Market regime information

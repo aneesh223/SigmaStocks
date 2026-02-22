@@ -15,7 +15,109 @@ BEARISH_REGIMES = {"BEAR", "STRONG_BEAR"}
 CHOPPY_REGIMES = {"CHOPPY", "CHOPPY_SIDEWAYS"}
 NEUTRAL_REGIMES = {"SIDEWAYS"}
 
+# SECTOR-AWARE THRESHOLD ADJUSTMENTS
+# Adjustment to buy threshold based on sector/stock characteristics
+# Negative = more aggressive (lower threshold), Positive = more conservative (higher threshold)
+SECTOR_THRESHOLDS = {
+    # Volatile Growth - Ultra aggressive (fast movers, sentiment lags)
+    'TSLA': -0.20, 'NVDA': -0.20, 'AMD': -0.20, 'ROKU': -0.20,
+    'PLTR': -0.20, 'ZOOM': -0.20, 'NFLX': -0.15,
+    
+    # Mega Cap Tech - Very aggressive (tech rallies are fast)
+    'AAPL': -0.15, 'MSFT': -0.15, 'GOOGL': -0.15, 
+    'AMZN': -0.15, 'META': -0.15,
+    
+    # Large Cap Tech - Aggressive
+    'ADBE': -0.10, 'CRM': -0.10, 'ORCL': -0.10, 
+    'INTC': -0.10, 'AVGO': -0.10,
+    
+    # Financials - Moderate (cyclical, moderate speed)
+    'JPM': -0.05, 'BAC': -0.05, 'WFC': -0.05,
+    'GS': -0.05, 'MS': -0.05, 'C': -0.05, 'BRK.B': -0.05,
+    
+    # Energy - Moderate (cyclical, regime-dependent)
+    'XOM': -0.05, 'CVX': -0.05, 'COP': -0.05,
+    'EOG': -0.05, 'SLB': -0.05, 'MPC': -0.05, 'VLO': -0.05,
+    
+    # Healthcare - Conservative (slow movers, wait for confirmation)
+    'JNJ': +0.05, 'PFE': +0.05, 'MRK': +0.05,
+    'UNH': +0.05, 'ABBV': +0.05, 'TMO': +0.05, 'DHR': +0.05,
+    
+    # Consumer - Very Conservative (defensive, slow)
+    'KO': +0.10, 'PEP': +0.10, 'WMT': +0.10,
+    'HD': +0.10, 'MCD': +0.10, 'NKE': +0.10, 'SBUX': +0.10,
+    
+    # Industrials - Conservative (slow, defensive)
+    'BA': +0.05, 'CAT': +0.05, 'GE': +0.05,
+    'MMM': +0.05, 'HON': +0.05, 'UPS': +0.05, 'RTX': +0.05,
+}
+
 logger = logging.getLogger(__name__)
+
+
+def detect_sentiment_price_divergence(price_data: pd.DataFrame, sentiment_score: float, 
+                                     lookback_days: int = 10) -> Tuple[bool, float, str]:
+    """
+    Detect when price momentum is leading sentiment (bullish divergence).
+    This fixes the sentiment lag problem in bull markets.
+    
+    Args:
+        price_data: Historical price data
+        sentiment_score: Current sentiment score (1-10 scale)
+        lookback_days: Days to look back for price momentum
+        
+    Returns:
+        (divergence_detected, boost_amount, reason)
+    """
+    if price_data is None or len(price_data) < lookback_days:
+        return False, 0.0, ""
+    
+    try:
+        prices = price_data['Close'] if isinstance(price_data, pd.DataFrame) else price_data
+        
+        # Calculate price momentum over different timeframes
+        if len(prices) >= 10:
+            momentum_10d = (prices.iloc[-1] - prices.iloc[-10]) / prices.iloc[-10]
+        else:
+            momentum_10d = 0
+            
+        if len(prices) >= 5:
+            momentum_5d = (prices.iloc[-1] - prices.iloc[-5]) / prices.iloc[-5]
+        else:
+            momentum_5d = 0
+        
+        # Detect divergence: price up but sentiment neutral/negative
+        # This is a BUY opportunity - price is leading sentiment
+        
+        # Strong divergence: 5%+ gain in 10 days, sentiment < 5.3
+        if momentum_10d > 0.05 and sentiment_score < 5.3:
+            boost = 0.50
+            reason = f"Strong divergence: price +{momentum_10d*100:.1f}% but sentiment only {sentiment_score:.2f}"
+            return True, boost, reason
+        
+        # Moderate divergence: 3%+ gain in 10 days, sentiment < 5.2
+        elif momentum_10d > 0.03 and sentiment_score < 5.2:
+            boost = 0.35
+            reason = f"Moderate divergence: price +{momentum_10d*100:.1f}% but sentiment only {sentiment_score:.2f}"
+            return True, boost, reason
+        
+        # Early divergence: 2%+ gain in 5 days, sentiment < 5.1
+        elif momentum_5d > 0.02 and sentiment_score < 5.1:
+            boost = 0.25
+            reason = f"Early divergence: price +{momentum_5d*100:.1f}% (5d) but sentiment only {sentiment_score:.2f}"
+            return True, boost, reason
+        
+        # Acceleration: 1.5%+ gain in 5 days, sentiment < 5.0
+        elif momentum_5d > 0.015 and sentiment_score < 5.0:
+            boost = 0.20
+            reason = f"Price acceleration: +{momentum_5d*100:.1f}% (5d) but sentiment neutral"
+            return True, boost, reason
+        
+        return False, 0.0, ""
+        
+    except Exception as e:
+        logger.debug(f"Divergence detection failed: {e}")
+        return False, 0.0, ""
 
 
 def calculate_bull_market_duration(price_data: pd.DataFrame, current_regime: str, lookback_days: int = 120) -> int:
@@ -82,6 +184,21 @@ def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
     if len(returns) < 5:
         return {'is_choppy': False, 'choppiness_score': 0.0, 'reason': 'Insufficient returns data'}
     
+    # OPTIMIZATION V10: Check for hidden trend first
+    # Even if market is volatile, if there's a clear directional bias, it's trending
+    net_return = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
+    
+    # If net return > 10% despite choppiness, it's a trend not chop
+    if abs(net_return) > 0.10:
+        return {
+            'is_choppy': False,
+            'is_very_choppy': False,
+            'choppiness_score': 0.0,
+            'directional_index': abs(net_return),
+            'net_return': net_return,
+            'reason': f"Hidden trend detected: {net_return:.1%} net return overrides choppiness"
+        }
+    
     # Directional movement calculation
     up_moves = returns[returns > 0].sum()
     down_moves = abs(returns[returns < 0].sum())
@@ -97,7 +214,6 @@ def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
     
     # Volatility vs trend analysis
     volatility = returns.std() * (252 ** 0.5)
-    net_return = (recent_prices.iloc[-1] - recent_prices.iloc[0]) / recent_prices.iloc[0]
     efficiency_ratio = abs(net_return) / volatility if volatility > 0 else 0
     
     # Consecutive reversals using vectorized operations
@@ -148,6 +264,7 @@ def detect_choppy_market(prices: pd.Series, lookback_days: int = 30) -> dict:
         'efficiency_ratio': efficiency_ratio,
         'reversal_rate': reversal_rate,
         'price_range': price_range,
+        'net_return': net_return,
         'factors': choppiness_factors,
         'reason': reason
     }
@@ -510,30 +627,39 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
 
 
 def calculate_adaptive_thresholds(score_history: List[float], market_regime: str, lookback: int = 20, 
-                                strategy: str = "momentum", bull_market_duration: int = 0) -> Tuple[float, float]:
-    """Calculate adaptive buy/sell thresholds based on market regime and score volatility."""
+                                strategy: str = "momentum", bull_market_duration: int = 0, ticker: str = None) -> Tuple[float, float]:
+    """Calculate adaptive buy/sell thresholds based on market regime, score volatility, and sector."""
     # Base thresholds by strategy and regime
+    # OPTIMIZATION V6: Maximum aggression to push positive alpha
     if strategy.lower() == "value":
         regime_thresholds = {
-            ("STRONG_BULL", "BULL"): (5.10, 4.70),
+            "STRONG_BULL": (4.55, 4.20),  # Maximum aggression
+            "BULL": (4.70, 4.40),  # Maximum aggression (was 4.80)
             ("STRONG_BEAR", "BEAR"): (5.50, 4.30),
-            ("CHOPPY", "CHOPPY_SIDEWAYS"): (5.80, 4.00),
+            ("CHOPPY", "CHOPPY_SIDEWAYS"): (7.00, 3.00),  # Extremely wide - avoid all trading
             "default": (5.25, 4.60)
         }
     else:
         regime_thresholds = {
-            ("STRONG_BULL", "BULL"): (5.05, 4.75),
+            "STRONG_BULL": (4.50, 4.20),  # Maximum aggression
+            "BULL": (4.65, 4.40),  # Maximum aggression (was 4.75)
             ("STRONG_BEAR", "BEAR"): (5.40, 4.40),
-            ("CHOPPY", "CHOPPY_SIDEWAYS"): (5.70, 4.10),
+            ("CHOPPY", "CHOPPY_SIDEWAYS"): (7.00, 3.00),  # Extremely wide - avoid all trading
             "default": (5.20, 4.65)
         }
     
     # Find base thresholds
     base_buy = base_sell = None
-    for regimes, (buy, sell) in regime_thresholds.items():
-        if regimes != "default" and market_regime in regimes:
-            base_buy, base_sell = buy, sell
-            break
+    
+    # Check for exact regime match first (for STRONG_BULL, BULL)
+    if market_regime in regime_thresholds:
+        base_buy, base_sell = regime_thresholds[market_regime]
+    else:
+        # Check for tuple matches
+        for regimes, (buy, sell) in regime_thresholds.items():
+            if regimes != "default" and isinstance(regimes, tuple) and market_regime in regimes:
+                base_buy, base_sell = buy, sell
+                break
     
     if base_buy is None:
         base_buy, base_sell = regime_thresholds["default"]
@@ -562,6 +688,16 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
     else:
         buy_threshold = base_buy
         sell_threshold = base_sell
+    
+    # SECTOR-AWARE ADJUSTMENT (V7)
+    # Apply sector-specific adjustments in bull markets only
+    if ticker and market_regime in BULLISH_REGIMES:
+        sector_adjustment = SECTOR_THRESHOLDS.get(ticker, 0.0)
+        if sector_adjustment != 0.0:
+            buy_threshold += sector_adjustment
+            logger.debug(f"Sector adjustment for {ticker}: {sector_adjustment:+.2f} → threshold: {buy_threshold:.2f}")
+            # Ensure we don't go below 4.0 or above 6.0
+            buy_threshold = max(4.0, min(buy_threshold, 6.0))
     
     return buy_threshold, sell_threshold
 
@@ -657,8 +793,95 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
             logger.debug(f"Sentiment override: {recent_sentiment:.2f} sentiment overrides {market_regime}")
             market_regime = "BULL"
     
+    # OPTIMIZATION V8: Sentiment-Price Divergence Detection (FIX SENTIMENT LAG)
+    # Detect when price is leading sentiment - this is the #1 fix for bull markets
+    divergence_detected = False
+    divergence_boost = 0.0
+    divergence_reason = ""
+    
+    if market_regime in BULLISH_REGIMES and price_data is not None:
+        divergence_detected, divergence_boost, divergence_reason = detect_sentiment_price_divergence(
+            price_data, final_buy_score, lookback_days=10
+        )
+        if divergence_detected:
+            logger.debug(f"Divergence detected: {divergence_reason}")
+    
+    # OPTIMIZATION V4: Complete choppy market avoidance
+    # In choppy markets, avoid trading entirely to prevent whipsaw losses
+    choppy_complete_avoidance = False
+    if market_regime in ["CHOPPY", "CHOPPY_SIDEWAYS"]:
+        choppy_complete_avoidance = True
+        logger.debug(f"Choppy market detected: {market_regime} - complete avoidance mode")
+    
+    # OPTIMIZATION: Choppy market cash mode protection (legacy, now superseded by complete avoidance)
+    # In very choppy markets, strongly prefer HOLD to avoid whipsaw losses
+    choppy_cash_mode = False
+    if not choppy_complete_avoidance and price_data is not None:
+        choppy_analysis = detect_choppy_market(price_data['Close'] if isinstance(price_data, pd.DataFrame) else price_data)
+        # V2: Lower threshold from 0.75 to 0.65 for earlier activation
+        if choppy_analysis['choppiness_score'] > 0.65:
+            choppy_cash_mode = True
+            logger.debug(f"Choppy cash mode activated: choppiness={choppy_analysis['choppiness_score']:.2f}")
+    
+    # OPTIMIZATION V5: Enhanced momentum confirmation override for bull markets
+    # Detect when price momentum is strong even if sentiment is lagging
+    momentum_override = False
+    momentum_boost = 0.0
+    if market_regime in BULLISH_REGIMES and price_data is not None:
+        try:
+            prices = price_data['Close'] if isinstance(price_data, pd.DataFrame) else price_data
+            if len(prices) >= 10:
+                # Calculate recent price momentum (last 10 days)
+                recent_return = (prices.iloc[-1] - prices.iloc[-10]) / prices.iloc[-10]
+                
+                # V5: Even more aggressive momentum boost
+                if market_regime == "STRONG_BULL":
+                    # In strong bulls, boost with any positive momentum
+                    if recent_return > 0.01 and final_buy_score < 5.5:
+                        momentum_override = True
+                        momentum_boost = 0.50  # Very strong boost
+                        logger.debug(f"STRONG_BULL momentum override: price +{recent_return*100:.1f}%")
+                    elif recent_return > 0.03 and final_buy_score < 5.3:
+                        momentum_override = True
+                        momentum_boost = 0.60  # Extreme boost
+                        logger.debug(f"STRONG_BULL strong momentum override: price +{recent_return*100:.1f}%")
+                else:
+                    # Regular BULL: more aggressive than before
+                    if recent_return > 0.015 and final_buy_score < 5.3:
+                        momentum_override = True
+                        momentum_boost = 0.35  # Strong boost (was 0.20)
+                        logger.debug(f"BULL momentum override: price +{recent_return*100:.1f}%")
+                    elif recent_return > 0.03 and final_buy_score < 5.2:
+                        momentum_override = True
+                        momentum_boost = 0.45  # Very strong boost (was 0.30)
+                        logger.debug(f"BULL strong momentum override: price +{recent_return*100:.1f}%")
+                    elif recent_return > 0.05 and final_buy_score < 5.1:
+                        momentum_override = True
+                        momentum_boost = 0.55  # Extreme boost
+                        logger.debug(f"BULL extreme momentum override: price +{recent_return*100:.1f}%")
+        except Exception as e:
+            logger.debug(f"Momentum override calculation failed: {e}")
+    
+    # Apply momentum boost to buy score for threshold comparison
+    adjusted_buy_score = final_buy_score + momentum_boost
+    
+    # OPTIMIZATION V8: Apply divergence boost (sentiment lag fix)
+    if divergence_detected:
+        adjusted_buy_score += divergence_boost
+        logger.debug(f"Divergence boost applied: {final_buy_score:.2f} + {divergence_boost:.2f} = {adjusted_buy_score:.2f}")
+    
+    # OPTIMIZATION V5: Early entry bonus for bull markets
+    # In bull markets, give a small bonus to scores near threshold to encourage earlier entry
+    early_entry_bonus = 0.0
+    if market_regime in BULLISH_REGIMES and not momentum_override and not divergence_detected:
+        # V6: Larger bonus and wider range (only if no other boosts applied)
+        if 4.5 <= final_buy_score < 5.0:
+            early_entry_bonus = 0.15  # Increased from 0.10
+            adjusted_buy_score += early_entry_bonus
+            logger.debug(f"Early entry bonus: score {final_buy_score:.2f} + {early_entry_bonus:.2f}")
+    
     # Calculate adaptive thresholds and risk parameters
-    buy_threshold, sell_threshold = calculate_adaptive_thresholds(score_history, market_regime, strategy=strategy)
+    buy_threshold, sell_threshold = calculate_adaptive_thresholds(score_history, market_regime, strategy=strategy, ticker=ticker)
     risk_params = get_adaptive_risk_params(market_regime, price_volatility, strategy=strategy)
     conviction_score = calculate_conviction_score(final_buy_score, score_history, market_regime)
     
@@ -674,11 +897,45 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         if sell_threshold != original_sell_threshold:
             logger.debug(f"Exposure preservation: adjusted sell threshold from {original_sell_threshold:.2f} to {sell_threshold:.2f}")
     
-    # Generate recommendation
-    if final_buy_score >= buy_threshold:
+    # OPTIMIZATION V4: Complete choppy market avoidance - always HOLD
+    if choppy_complete_avoidance:
+        recommendation = "HOLD"
+        confidence = 90
+        reasoning = f"{market_regime} market detected - avoiding all trades to prevent whipsaw losses"
+    # OPTIMIZATION: Apply choppy cash mode - strongly resist new positions (legacy)
+    elif choppy_cash_mode:
+        # In choppy cash mode, only allow HOLD unless score is extreme
+        if final_buy_score < 3.5:
+            recommendation = "SELL"
+            confidence = 60
+            reasoning = f"Score {final_buy_score:.2f} extremely bearish - override choppy cash mode"
+        elif final_buy_score > 6.5:
+            recommendation = "BUY"
+            confidence = 60
+            reasoning = f"Score {final_buy_score:.2f} extremely bullish - override choppy cash mode"
+        else:
+            recommendation = "HOLD"
+            confidence = 80
+            reasoning = f"Choppy market (score: {choppy_analysis['choppiness_score']:.2f}) - staying in cash to avoid whipsaw"
+    # Generate recommendation using adjusted buy score (with momentum boost if applicable)
+    elif adjusted_buy_score >= buy_threshold:
         recommendation = "BUY"
-        confidence = min(100, ((final_buy_score - buy_threshold) / (10 - buy_threshold)) * 100)
-        reasoning = f"Score {final_buy_score:.2f} exceeds {market_regime} buy threshold {buy_threshold:.3f}"
+        confidence = min(100, ((adjusted_buy_score - buy_threshold) / (10 - buy_threshold)) * 100)
+        
+        # Build reasoning with all boosts
+        boosts = []
+        if divergence_detected:
+            boosts.append(f"divergence +{divergence_boost:.2f}")
+        if momentum_override:
+            boosts.append(f"momentum +{momentum_boost:.2f}")
+        if early_entry_bonus > 0:
+            boosts.append(f"early entry +{early_entry_bonus:.2f}")
+        
+        if boosts:
+            boost_str = " + ".join(boosts)
+            reasoning = f"Score {final_buy_score:.2f} + {boost_str} = {adjusted_buy_score:.2f} exceeds {market_regime} buy threshold {buy_threshold:.3f}"
+        else:
+            reasoning = f"Score {final_buy_score:.2f} exceeds {market_regime} buy threshold {buy_threshold:.3f}"
     elif final_buy_score <= sell_threshold:
         # Resist selling in bull regimes unless very bearish
         if is_bull_regime and final_buy_score > 4.2:
@@ -691,11 +948,23 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
             reasoning = f"Score {final_buy_score:.2f} below {market_regime} sell threshold {sell_threshold:.3f}"
     else:
         # Neutral zone logic
-        if exposure_bias and final_buy_score >= 4.8:
+        if exposure_bias and adjusted_buy_score >= 4.8:
             recommendation = "BUY"
             confidence = 40
-            reasoning = f"Score {final_buy_score:.2f} in neutral zone but exposure bias favors buy"
-        elif len(score_history) >= 3 and np.mean(score_history[-3:]) > np.mean(score_history[-6:-3]) and final_buy_score > 4.7:
+            boosts = []
+            if divergence_detected:
+                boosts.append(f"divergence +{divergence_boost:.2f}")
+            if momentum_override:
+                boosts.append(f"momentum +{momentum_boost:.2f}")
+            if early_entry_bonus > 0:
+                boosts.append(f"early entry +{early_entry_bonus:.2f}")
+            
+            if boosts:
+                boost_str = " + ".join(boosts)
+                reasoning = f"Score {final_buy_score:.2f} + {boost_str} in neutral zone but exposure bias favors buy"
+            else:
+                reasoning = f"Score {final_buy_score:.2f} in neutral zone but exposure bias favors buy"
+        elif len(score_history) >= 3 and np.mean(score_history[-3:]) > np.mean(score_history[-6:-3]) and adjusted_buy_score > 4.7:
             recommendation = "HOLD"
             confidence = 35
             reasoning = f"Score {final_buy_score:.2f} in neutral zone with improving sentiment trend"
@@ -764,6 +1033,13 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         'reasoning': reasoning,
         'risk_params': risk_params,
         'final_buy_score': final_buy_score,
+        'adjusted_buy_score': adjusted_buy_score,  # Include adjusted score
+        'momentum_override': momentum_override,  # Flag if momentum override applied
+        'momentum_boost': momentum_boost,  # Amount of boost applied
+        'divergence_detected': divergence_detected,  # Flag if divergence detected
+        'divergence_boost': divergence_boost,  # Amount of divergence boost
+        'early_entry_bonus': early_entry_bonus,  # Amount of early entry bonus
+        'choppy_cash_mode': choppy_cash_mode,  # Flag if choppy protection active
         'conviction_score': conviction_score,
         'position_size_multiplier': risk_params['position_size_multiplier'] * conviction_score,
         'exposure_bias_applied': exposure_bias and recommendation in ["BUY", "HOLD"],

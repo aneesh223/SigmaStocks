@@ -14,15 +14,37 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-def get_random_date_range():
+def get_random_date_range(strategy=None):
     """
-    Generate random start and end dates within Alpaca free tier support
-    Alpaca free tier supports data from ~2015 onwards
-    We'll use 2020-2024 for good data quality and recent market conditions
+    Generate random start and end dates within Alpaca free tier support.
+    
+    If strategy is provided, uses strategy-optimal periods:
+    - MOMENTUM: 3-5 years (1095-1825 days)
+    - VALUE: 5-10 years (1825-3650 days)
+    
+    Otherwise uses diverse testing periods (30-365 days) for comprehensive validation.
+    
+    Alpaca free tier supports data from ~2015 onwards.
+    We'll use 2015-2024 for good data quality and recent market conditions.
     """
     # Define the available date range (Alpaca free tier with good data quality)
-    start_year = 2020
+    start_year = 2015
     end_year = 2024
+    
+    # Strategy-specific optimal periods
+    if strategy:
+        if strategy.lower() in ['m', 'momentum']:
+            # Momentum: 3-5 years
+            min_days = 1095  # 3 years
+            max_days = 1825  # 5 years
+        else:  # value
+            # Value: 5-10 years
+            min_days = 1825  # 5 years
+            max_days = 3650  # 10 years
+    else:
+        # Diverse testing: 30-365 days for comprehensive validation
+        min_days = 30
+        max_days = 365
     
     # Generate random start date
     start_date = datetime(
@@ -31,9 +53,7 @@ def get_random_date_range():
         day=random.randint(1, 28)  # Use 28 to avoid month-end issues
     )
     
-    # Generate random period length (30-365 days)
-    min_days = 30
-    max_days = 365
+    # Generate random period length
     period_days = random.randint(min_days, max_days)
     
     end_date = start_date + timedelta(days=period_days)
@@ -50,6 +70,14 @@ def get_random_date_range():
         if (end_date - start_date).days < min_days:
             start_date = end_date - timedelta(days=min_days)
     
+    # Ensure start date is not before our data range
+    min_start_date = datetime(start_year, 1, 1)
+    if start_date < min_start_date:
+        start_date = min_start_date
+        end_date = start_date + timedelta(days=period_days)
+        if end_date > max_end_date:
+            end_date = max_end_date
+    
     return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
 
 def get_ticker_pools():
@@ -65,8 +93,14 @@ def get_ticker_pools():
         'volatile_growth': ['TSLA', 'NVDA', 'AMD', 'NFLX', 'ZOOM', 'ROKU', 'PLTR']
     }
 
-def select_random_parameters():
-    """Randomly select ticker, strategy, and date range"""
+def select_random_parameters(use_optimal_periods=False):
+    """
+    Randomly select ticker, strategy, and date range.
+    
+    Args:
+        use_optimal_periods: If True, uses strategy-optimal periods (3-10 years)
+                           If False, uses diverse testing periods (30-365 days)
+    """
     ticker_pools = get_ticker_pools()
     
     # Randomly select a category and then a ticker from that category
@@ -76,18 +110,23 @@ def select_random_parameters():
     # Randomly select strategy
     strategy = random.choice(['m', 'v'])  # momentum or value
     
-    # Generate random date range
-    start_date, end_date = get_random_date_range()
+    # Generate date range (strategy-aware if optimal periods enabled)
+    if use_optimal_periods:
+        start_date, end_date = get_random_date_range(strategy)
+    else:
+        start_date, end_date = get_random_date_range()
     
     # Create description
     strategy_name = "MOMENTUM" if strategy == 'm' else "VALUE"
-    description = f"RANDOM TEST: {ticker} {strategy_name} strategy ({category.replace('_', ' ').title()})"
+    period_days = (datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')).days
+    period_years = period_days / 365.25
+    description = f"RANDOM TEST: {ticker} {strategy_name} strategy ({category.replace('_', ' ').title()}) - {period_years:.1f} years"
     
     return ticker, strategy, start_date, end_date, description, category
 
 def run_backtest(ticker, strategy, start_date, end_date, description="", print_header=True):
     """Run a single backtest and capture results"""
-    cmd = ['python3', 'backtester/run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
+    cmd = ['python3', 'run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
     
     if print_header:
         print(f"\n{'='*80}")
@@ -105,6 +144,10 @@ def run_backtest(ticker, strategy, start_date, end_date, description="", print_h
             strategy_return = None
             buy_hold_return = None
             alpha = None
+            dollar_alpha = None
+            relative_alpha = None
+            strategy_gain = None
+            buy_hold_gain = None
             trades = None
             regime = None
             
@@ -113,8 +156,16 @@ def run_backtest(ticker, strategy, start_date, end_date, description="", print_h
                     strategy_return = line.split(":")[1].strip()
                 elif "Buy & Hold Return:" in line:
                     buy_hold_return = line.split(":")[1].strip()
-                elif "Alpha (Outperformance):" in line:
+                elif "Alpha (Percentage Points):" in line:
                     alpha = line.split(":")[1].strip()
+                elif "Dollar Alpha:" in line:
+                    dollar_alpha = line.split(":")[1].strip()
+                elif "Relative Alpha:" in line:
+                    relative_alpha = line.split(":")[1].strip().split()[0]  # Get just the percentage
+                elif "Strategy Gain:" in line:
+                    strategy_gain = line.split(":")[1].strip()
+                elif "Buy-Hold Gain:" in line:
+                    buy_hold_gain = line.split(":")[1].strip()
                 elif "Number of Trades:" in line:
                     trades = line.split(":")[1].strip()
                 elif "Initial Regime:" in line:
@@ -125,6 +176,10 @@ def run_backtest(ticker, strategy, start_date, end_date, description="", print_h
                 'strategy_return': strategy_return,
                 'buy_hold_return': buy_hold_return,
                 'alpha': alpha,
+                'dollar_alpha': dollar_alpha,
+                'relative_alpha': relative_alpha,
+                'strategy_gain': strategy_gain,
+                'buy_hold_gain': buy_hold_gain,
                 'trades': trades,
                 'regime': regime,
                 'ticker': ticker,
@@ -153,6 +208,8 @@ def main():
     parser.add_argument('--seed', type=int, help='Random seed for reproducible results')
     parser.add_argument('--threads', type=int, default=4, 
                        help='Number of concurrent threads (default: 4)')
+    parser.add_argument('--optimal-periods', action='store_true',
+                       help='Use strategy-optimal periods (momentum=3-5yr, value=5-10yr) instead of diverse testing (30-365 days)')
     
     args = parser.parse_args()
     
@@ -163,13 +220,17 @@ def main():
     
     print("ORTHRUS RANDOM BATCH BACKTESTING")
     print(f"Running {args.num_tests} random backtests across diverse market conditions")
+    if args.optimal_periods:
+        print("Using OPTIMAL PERIODS: Momentum=3-5 years, Value=5-10 years")
+    else:
+        print("Using DIVERSE TESTING: 30-365 day periods for comprehensive validation")
     print(f"Using {args.threads} concurrent threads for parallel execution")
     print("=" * 80)
     
     # Generate all test parameters upfront for thread safety
     test_params = []
     for i in range(args.num_tests):
-        ticker, strategy, start_date, end_date, description, category = select_random_parameters()
+        ticker, strategy, start_date, end_date, description, category = select_random_parameters(args.optimal_periods)
         test_params.append((i+1, ticker, strategy, start_date, end_date, description, category))
     
     results = []
@@ -263,15 +324,20 @@ def main():
             
             for result in cat_results:
                 alpha_color = "🟢" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) > 0 else "🔴" if result['alpha'] and float(result['alpha'].replace('%', '').replace('+', '')) < -5 else "🟡"
-                print(f"{alpha_color} {result['ticker']} {result['strategy']}: {result['alpha']} alpha | {result['trades']} trades | {result['regime']}")
-                print(f"   Strategy: {result['strategy_return']} vs Buy-Hold: {result['buy_hold_return']}")
+                dollar_alpha_str = result.get('dollar_alpha', 'N/A')
+                print(f"{alpha_color} {result['ticker']} {result['strategy']}: {result['alpha']} alpha ({dollar_alpha_str} $) | {result['trades']} trades | {result['regime']}")
+                print(f"   Strategy: {result['strategy_return']} ({result.get('strategy_gain', 'N/A')}) vs Buy-Hold: {result['buy_hold_return']} ({result.get('buy_hold_gain', 'N/A')})")
                 print(f"   Period: {result['period']}")
                 print()
         
         # Calculate overall statistics
         alphas = []
+        dollar_alphas = []
+        relative_alphas = []
         momentum_alphas = []
         value_alphas = []
+        momentum_dollar_alphas = []
+        value_dollar_alphas = []
         
         for result in successful_results:
             if result['alpha']:
@@ -285,6 +351,27 @@ def main():
                         value_alphas.append(alpha_val)
                 except:
                     pass
+            
+            # Parse dollar alpha
+            if result.get('dollar_alpha'):
+                try:
+                    dollar_val = float(result['dollar_alpha'].replace('$', '').replace(',', '').replace('+', ''))
+                    dollar_alphas.append(dollar_val)
+                    
+                    if result['strategy'] == 'M':
+                        momentum_dollar_alphas.append(dollar_val)
+                    else:
+                        value_dollar_alphas.append(dollar_val)
+                except:
+                    pass
+            
+            # Parse relative alpha
+            if result.get('relative_alpha'):
+                try:
+                    rel_val = float(result['relative_alpha'].replace('%', '').replace('+', ''))
+                    relative_alphas.append(rel_val)
+                except:
+                    pass
         
         if alphas:
             avg_alpha = sum(alphas) / len(alphas)
@@ -293,22 +380,37 @@ def main():
             
             print(f"\nOVERALL STATISTICS")
             print("-" * 40)
-            print(f"Average Alpha: {avg_alpha:+.2f}%")
+            print(f"Average Alpha (Percentage Points): {avg_alpha:+.2f}%")
+            
+            if dollar_alphas:
+                avg_dollar_alpha = sum(dollar_alphas) / len(dollar_alphas)
+                print(f"Average Dollar Alpha: ${avg_dollar_alpha:+,.2f}")
+            
+            if relative_alphas:
+                avg_relative_alpha = sum(relative_alphas) / len(relative_alphas)
+                print(f"Average Relative Alpha: {avg_relative_alpha:+.2f}% of initial capital")
+            
             print(f"Positive Alpha: {positive_alpha_count}/{len(alphas)} ({positive_alpha_count/len(alphas)*100:.1f}%)")
             print(f"Near Buy-Hold (±2%): {near_zero_count}/{len(alphas)} ({near_zero_count/len(alphas)*100:.1f}%)")
             
             if momentum_alphas:
                 momentum_avg = sum(momentum_alphas) / len(momentum_alphas)
-                print(f"Momentum Strategy Avg: {momentum_avg:+.2f}% ({len(momentum_alphas)} tests)")
+                momentum_dollar_avg = sum(momentum_dollar_alphas) / len(momentum_dollar_alphas) if momentum_dollar_alphas else 0
+                print(f"Momentum Strategy Avg: {momentum_avg:+.2f}% (${momentum_dollar_avg:+,.2f}) ({len(momentum_alphas)} tests)")
             
             if value_alphas:
                 value_avg = sum(value_alphas) / len(value_alphas)
-                print(f"Value Strategy Avg: {value_avg:+.2f}% ({len(value_alphas)} tests)")
+                value_dollar_avg = sum(value_dollar_alphas) / len(value_dollar_alphas) if value_dollar_alphas else 0
+                print(f"Value Strategy Avg: {value_avg:+.2f}% (${value_dollar_avg:+,.2f}) ({len(value_alphas)} tests)")
     
     print(f"\n{'='*80}")
     print("TIP: Run with --seed <number> for reproducible results")
     print("TIP: Use --threads <number> to control parallel execution (default: 4)")
+    print("TIP: Use --optimal-periods to test with strategy-optimal timeframes")
     print("TIP: Increase number of tests for more comprehensive analysis")
+    print("\nOptimal Backtesting Periods:")
+    print("  MOMENTUM: 3-5 years (captures full market cycles + 200-day SMA warm-up)")
+    print("  VALUE: 5-10 years (tests long-term mean reversion across crashes)")
     
     return 0 if successful > 0 else 1
 
