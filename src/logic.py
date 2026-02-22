@@ -976,6 +976,54 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
     # Apply conviction to confidence
     confidence = min(100, confidence * conviction_score)
     
+    # Apply microstructure adjustment (real-time only - requires intraday data)
+    microstructure_applied = False
+    try:
+        from src.microstructure import analyze_liquidity
+        
+        microstructure = analyze_liquidity(ticker)
+        anomaly_score = microstructure['anomaly_score']
+        
+        # Only apply if we have high-confidence data (not fallback neutral score)
+        if microstructure['confidence'] == 'high':
+            microstructure_applied = True
+            
+            # Adjust BUY recommendations based on microstructure
+            if recommendation == "BUY":
+                original_confidence = confidence
+                if anomaly_score > 0.85:
+                    # Critical liquidity void - reduce confidence by 30%
+                    confidence *= 0.7
+                    reasoning += f" | Microstructure: {microstructure['status']} (score: {anomaly_score:.2f})"
+                    logger.info(f"Microstructure adjustment applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f} (anomaly score: {anomaly_score:.2f})")
+                elif anomaly_score > 0.70:
+                    # High volatility - reduce confidence by 15%
+                    confidence *= 0.85
+                    reasoning += f" | Microstructure: {microstructure['status']} (score: {anomaly_score:.2f})"
+                    logger.info(f"Microstructure adjustment applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f} (anomaly score: {anomaly_score:.2f})")
+                elif anomaly_score < 0.20:
+                    # Strong accumulation - boost confidence by 20%
+                    confidence *= 1.2
+                    reasoning += f" | Microstructure: {microstructure['status']} (score: {anomaly_score:.2f})"
+                    logger.info(f"Microstructure adjustment applied for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f} (anomaly score: {anomaly_score:.2f})")
+                
+                # Ensure confidence stays in [0, 100]
+                confidence = max(0, min(100, confidence))
+            
+            # Also adjust SELL recommendations for extreme anomalies
+            elif recommendation == "SELL" and anomaly_score > 0.85:
+                # Critical liquidity void confirms sell signal - boost confidence
+                original_confidence = confidence
+                confidence *= 1.15
+                reasoning += f" | Microstructure: {microstructure['status']} confirms sell (score: {anomaly_score:.2f})"
+                logger.info(f"Microstructure confirmation for {ticker}: confidence {original_confidence:.1f} -> {confidence:.1f}")
+                confidence = max(0, min(100, confidence))
+    
+    except Exception as e:
+        # Fail gracefully - don't break existing logic
+        # Note: Microstructure analysis requires intraday data and won't work for historical backtesting
+        logger.debug(f"Microstructure analysis skipped: {e}")
+    
     return {
         'recommendation': recommendation,
         'confidence': max(0, min(100, confidence)),
@@ -995,5 +1043,6 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         'conviction_score': conviction_score,
         'position_size_multiplier': risk_params['position_size_multiplier'] * conviction_score,
         'exposure_bias_applied': exposure_bias and recommendation in ["BUY", "HOLD"],
-        'exposure_preserved': is_bull_regime and sentiment_positive and recommendation != "SELL"
+        'exposure_preserved': is_bull_regime and sentiment_positive and recommendation != "SELL",
+        'microstructure_applied': microstructure_applied
     }
