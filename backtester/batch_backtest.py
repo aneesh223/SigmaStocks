@@ -14,11 +14,13 @@ from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 
-def get_random_date_range():
+def get_random_date_range(strategy=None):
     """
     Generate random start and end dates within Alpaca free tier support
-    Alpaca free tier supports data from ~2015 onwards
-    We'll use 2020-2024 for good data quality and recent market conditions
+    Respects strategy-specific timeframe restrictions from input.py
+    
+    Args:
+        strategy: 'm' for momentum, 'v' for value (affects max period length)
     """
     # Define the available date range (Alpaca free tier with good data quality)
     start_year = 2020
@@ -31,10 +33,26 @@ def get_random_date_range():
         day=random.randint(1, 28)  # Use 28 to avoid month-end issues
     )
     
-    # Generate random period length (30-365 days)
-    min_days = 30
-    max_days = 365
-    period_days = random.randint(min_days, max_days)
+    # Strategy-specific timeframe restrictions (matching input.py)
+    if strategy == 'm':  # MOMENTUM strategy
+        # Allowed: 1D, 5D, 1M, 6M (1-180 days max)
+        min_days = 1
+        max_days = 180
+        # Common periods: 1, 5, 30, 180 days
+        period_options = [1, 5, 30, 60, 90, 120, 150, 180]
+        period_days = random.choice(period_options)
+    elif strategy == 'v':  # VALUE strategy  
+        # Allowed: 1M, 6M, YTD, 1Y (30-365 days)
+        min_days = 30
+        max_days = 365
+        # Common periods: 30, 90, 180, 270, 365 days
+        period_options = [30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330, 365]
+        period_days = random.choice(period_options)
+    else:
+        # Fallback for backward compatibility
+        min_days = 30
+        max_days = 365
+        period_days = random.randint(min_days, max_days)
     
     end_date = start_date + timedelta(days=period_days)
     
@@ -66,7 +84,7 @@ def get_ticker_pools():
     }
 
 def select_random_parameters():
-    """Randomly select ticker, strategy, and date range"""
+    """Randomly select ticker, strategy, and date range with strategy-aware timeframes"""
     ticker_pools = get_ticker_pools()
     
     # Randomly select a category and then a ticker from that category
@@ -76,8 +94,8 @@ def select_random_parameters():
     # Randomly select strategy
     strategy = random.choice(['m', 'v'])  # momentum or value
     
-    # Generate random date range
-    start_date, end_date = get_random_date_range()
+    # Generate random date range respecting strategy timeframe restrictions
+    start_date, end_date = get_random_date_range(strategy)
     
     # Create description
     strategy_name = "MOMENTUM" if strategy == 'm' else "VALUE"
