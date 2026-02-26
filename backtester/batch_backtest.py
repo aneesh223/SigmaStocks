@@ -105,7 +105,7 @@ def select_random_parameters():
 
 def run_backtest(ticker, strategy, start_date, end_date, description="", print_header=True):
     """Run a single backtest and capture results"""
-    cmd = ['python3', 'run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
+    cmd = ['python3', 'backtester/run_backtest.py', ticker, strategy, start_date, end_date, '--no-plot']
     
     if print_header:
         print(f"\n{'='*80}")
