@@ -544,18 +544,18 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
             'min_hold': 1.0, 'threshold': 1.0
         }
     
-    # Base parameters by regime
+    # Base parameters by regime - OPTIMIZATION V7: More aggressive position sizing for alpha generation
     regime_params = {
         "STRONG_BULL": {
-            'stop_loss_pct': -0.25, 'take_profit_pct': 3.0, 'trailing_stop_pct': -0.60,
-            'position_size_multiplier': 1.5, 'threshold_tightness': 0.6,
-            'momentum_bias': 0.4, 'conviction_multiplier': 2.0, 'min_hold_days': 21,
+            'stop_loss_pct': -0.30, 'take_profit_pct': 4.0, 'trailing_stop_pct': -0.70,  # Wider stops, higher targets
+            'position_size_multiplier': 1.8, 'threshold_tightness': 0.5,  # Larger positions (was 1.5)
+            'momentum_bias': 0.5, 'conviction_multiplier': 2.5, 'min_hold_days': 28,  # Higher conviction (was 2.0)
             'trend_following': True, 'exposure_bias': True
         },
         "BULL": {
-            'stop_loss_pct': -0.20, 'take_profit_pct': 2.0, 'trailing_stop_pct': -0.45,
-            'position_size_multiplier': 1.3, 'threshold_tightness': 0.7,
-            'momentum_bias': 0.3, 'conviction_multiplier': 1.7, 'min_hold_days': 14,
+            'stop_loss_pct': -0.25, 'take_profit_pct': 2.5, 'trailing_stop_pct': -0.55,  # Wider stops, higher targets
+            'position_size_multiplier': 1.6, 'threshold_tightness': 0.6,  # Larger positions (was 1.3)
+            'momentum_bias': 0.4, 'conviction_multiplier': 2.0, 'min_hold_days': 18,  # Higher conviction (was 1.7)
             'trend_following': True, 'exposure_bias': True
         },
         "STRONG_BEAR": {
@@ -571,16 +571,16 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
             'trend_following': False, 'exposure_bias': False
         },
         "CHOPPY": {
-            'stop_loss_pct': -0.05, 'take_profit_pct': 0.15, 'trailing_stop_pct': -0.08,
-            'position_size_multiplier': 0.5, 'threshold_tightness': 2.0,
-            'momentum_bias': 0.0, 'conviction_multiplier': 0.5, 'min_hold_days': 7,
+            'stop_loss_pct': -0.08, 'take_profit_pct': 0.20, 'trailing_stop_pct': -0.10,  # Slightly wider for alpha generation
+            'position_size_multiplier': 0.7, 'threshold_tightness': 1.8,  # Larger positions (was 0.5)
+            'momentum_bias': 0.0, 'conviction_multiplier': 0.7, 'min_hold_days': 7,  # Higher conviction (was 0.5)
             'trend_following': False, 'choppy_protection': True
         },
         "CHOPPY_SIDEWAYS": {
-            'stop_loss_pct': -0.03, 'take_profit_pct': 0.10, 'trailing_stop_pct': -0.05,
-            'position_size_multiplier': 0.3, 'threshold_tightness': 3.0,
-            'momentum_bias': 0.0, 'conviction_multiplier': 0.3, 'min_hold_days': 10,
-            'trend_following': False, 'choppy_protection': True, 'avoid_new_positions': True
+            'stop_loss_pct': -0.05, 'take_profit_pct': 0.15, 'trailing_stop_pct': -0.07,  # Slightly wider
+            'position_size_multiplier': 0.5, 'threshold_tightness': 2.5,  # Larger positions (was 0.3)
+            'momentum_bias': 0.0, 'conviction_multiplier': 0.5, 'min_hold_days': 10,  # Higher conviction (was 0.3)
+            'trend_following': False, 'choppy_protection': True, 'avoid_new_positions': False  # Allow positions (was True)
         }
     }
     
@@ -601,14 +601,14 @@ def get_adaptive_risk_params(market_regime: str, price_volatility: float = None,
     adjusted_params['threshold_tightness'] = base_params['threshold_tightness'] * value_multipliers['threshold']
     adjusted_params['min_hold_days'] = int(base_params['min_hold_days'] * value_multipliers['min_hold'])
     
-    # Bull regime aggression floor
+    # Bull regime aggression floor - OPTIMIZATION V7: Higher minimums for alpha generation
     if market_regime in BULLISH_REGIMES:
-        min_position_multiplier = 1.0 if market_regime == "BULL" else 1.2
-        min_conviction_multiplier = 1.5 if market_regime == "BULL" else 1.8
+        min_position_multiplier = 1.3 if market_regime == "BULL" else 1.5  # Higher minimums (was 1.0, 1.2)
+        min_conviction_multiplier = 1.8 if market_regime == "BULL" else 2.2  # Higher minimums (was 1.5, 1.8)
         
         adjusted_params['position_size_multiplier'] = max(adjusted_params['position_size_multiplier'], min_position_multiplier)
         adjusted_params['conviction_multiplier'] = max(adjusted_params['conviction_multiplier'], min_conviction_multiplier)
-        adjusted_params['threshold_tightness'] = min(adjusted_params['threshold_tightness'], 1.0)
+        adjusted_params['threshold_tightness'] = min(adjusted_params['threshold_tightness'], 0.8)  # More aggressive (was 1.0)
     
     # Add metadata
     adjusted_params.update({
@@ -630,22 +630,22 @@ def calculate_adaptive_thresholds(score_history: List[float], market_regime: str
                                 strategy: str = "momentum", bull_market_duration: int = 0, ticker: str = None) -> Tuple[float, float]:
     """Calculate adaptive buy/sell thresholds based on market regime, score volatility, and sector."""
     # Base thresholds by strategy and regime
-    # OPTIMIZATION V6: Maximum aggression to push positive alpha
+    # OPTIMIZATION V8: Even more aggressive momentum strategy thresholds
     if strategy.lower() == "value":
         regime_thresholds = {
-            "STRONG_BULL": (4.55, 4.20),  # Maximum aggression
-            "BULL": (4.70, 4.40),  # Maximum aggression (was 4.80)
-            ("STRONG_BEAR", "BEAR"): (5.50, 4.30),
-            ("CHOPPY", "CHOPPY_SIDEWAYS"): (7.00, 3.00),  # Extremely wide - avoid all trading
-            "default": (5.25, 4.60)
+            "STRONG_BULL": (4.30, 4.10),  # Ultra-aggressive for alpha generation
+            "BULL": (4.45, 4.25),  # More aggressive (was 4.70)
+            ("STRONG_BEAR", "BEAR"): (5.30, 4.20),  # Slightly more aggressive
+            ("CHOPPY", "CHOPPY_SIDEWAYS"): (5.80, 3.50),  # Less restrictive - allow some choppy trades
+            "default": (5.00, 4.50)  # More aggressive default
         }
-    else:
+    else:  # Momentum strategy - make even more aggressive
         regime_thresholds = {
-            "STRONG_BULL": (4.50, 4.20),  # Maximum aggression
-            "BULL": (4.65, 4.40),  # Maximum aggression (was 4.75)
-            ("STRONG_BEAR", "BEAR"): (5.40, 4.40),
-            ("CHOPPY", "CHOPPY_SIDEWAYS"): (7.00, 3.00),  # Extremely wide - avoid all trading
-            "default": (5.20, 4.65)
+            "STRONG_BULL": (4.15, 4.05),  # Even more aggressive (was 4.25)
+            "BULL": (4.25, 4.15),  # Even more aggressive (was 4.40)
+            ("STRONG_BEAR", "BEAR"): (5.00, 4.20),  # More aggressive (was 5.20)
+            ("CHOPPY", "CHOPPY_SIDEWAYS"): (5.50, 3.70),  # Much less restrictive (was 5.70)
+            "default": (4.80, 4.45)  # More aggressive default (was 4.95)
         }
     
     # Find base thresholds
@@ -836,12 +836,21 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         if divergence_detected:
             logger.debug(f"Divergence detected: {divergence_reason}")
     
-    # OPTIMIZATION V4: Complete choppy market avoidance
-    # In choppy markets, avoid trading entirely to prevent whipsaw losses
+    # OPTIMIZATION V7: Reduce choppy market complete avoidance for alpha generation
+    # Allow some trading in choppy markets with higher thresholds instead of complete avoidance
     choppy_complete_avoidance = False
     if market_regime in ["CHOPPY", "CHOPPY_SIDEWAYS"]:
-        choppy_complete_avoidance = True
-        logger.debug(f"Choppy market detected: {market_regime} - complete avoidance mode")
+        # Only avoid if extremely choppy (score > 0.8) or very low sentiment
+        if price_data is not None:
+            choppy_analysis = detect_choppy_market(price_data['Close'] if isinstance(price_data, pd.DataFrame) else price_data)
+            if choppy_analysis['choppiness_score'] > 0.8 or final_buy_score < 4.0:
+                choppy_complete_avoidance = True
+                logger.debug(f"Extreme choppy market detected: {market_regime} (score: {choppy_analysis['choppiness_score']:.2f}) - complete avoidance mode")
+        else:
+            # Without price data, only avoid if sentiment is very negative
+            if final_buy_score < 4.0:
+                choppy_complete_avoidance = True
+                logger.debug(f"Choppy market with low sentiment: {market_regime} - complete avoidance mode")
     
     # OPTIMIZATION: Choppy market cash mode protection (legacy, now superseded by complete avoidance)
     # In very choppy markets, strongly prefer HOLD to avoid whipsaw losses
@@ -853,8 +862,8 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
             choppy_cash_mode = True
             logger.debug(f"Choppy cash mode activated: choppiness={choppy_analysis['choppiness_score']:.2f}")
     
-    # OPTIMIZATION V5: Enhanced momentum confirmation override for bull markets
-    # Detect when price momentum is strong even if sentiment is lagging
+    # OPTIMIZATION V7: Enhanced momentum boost for alpha generation
+    # More aggressive momentum detection and larger boosts
     momentum_override = False
     momentum_boost = 0.0
     if market_regime in BULLISH_REGIMES and price_data is not None:
@@ -864,30 +873,30 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
                 # Calculate recent price momentum (last 10 days)
                 recent_return = (prices.iloc[-1] - prices.iloc[-10]) / prices.iloc[-10]
                 
-                # V5: Even more aggressive momentum boost
+                # V8: Ultra-aggressive momentum thresholds and massive boosts for momentum strategy
                 if market_regime == "STRONG_BULL":
                     # In strong bulls, boost with any positive momentum
-                    if recent_return > 0.01 and final_buy_score < 5.5:
+                    if recent_return > 0.002 and final_buy_score < 6.0:  # Even lower threshold
                         momentum_override = True
-                        momentum_boost = 0.50  # Very strong boost
+                        momentum_boost = 0.90  # Massive boost (was 0.70)
                         logger.debug(f"STRONG_BULL momentum override: price +{recent_return*100:.1f}%")
-                    elif recent_return > 0.03 and final_buy_score < 5.3:
+                    elif recent_return > 0.015 and final_buy_score < 5.8:
                         momentum_override = True
-                        momentum_boost = 0.60  # Extreme boost
+                        momentum_boost = 1.00  # Extreme boost (was 0.80)
                         logger.debug(f"STRONG_BULL strong momentum override: price +{recent_return*100:.1f}%")
                 else:
-                    # Regular BULL: more aggressive than before
-                    if recent_return > 0.015 and final_buy_score < 5.3:
+                    # Regular BULL: ultra-aggressive for momentum
+                    if recent_return > 0.005 and final_buy_score < 5.8:  # Much lower threshold
                         momentum_override = True
-                        momentum_boost = 0.35  # Strong boost (was 0.20)
+                        momentum_boost = 0.70  # Massive boost (was 0.50)
                         logger.debug(f"BULL momentum override: price +{recent_return*100:.1f}%")
-                    elif recent_return > 0.03 and final_buy_score < 5.2:
+                    elif recent_return > 0.015 and final_buy_score < 5.5:
                         momentum_override = True
-                        momentum_boost = 0.45  # Very strong boost (was 0.30)
+                        momentum_boost = 0.85  # Massive boost (was 0.65)
                         logger.debug(f"BULL strong momentum override: price +{recent_return*100:.1f}%")
-                    elif recent_return > 0.05 and final_buy_score < 5.1:
+                    elif recent_return > 0.03 and final_buy_score < 5.3:
                         momentum_override = True
-                        momentum_boost = 0.55  # Extreme boost
+                        momentum_boost = 1.00  # Extreme boost (was 0.80)
                         logger.debug(f"BULL extreme momentum override: price +{recent_return*100:.1f}%")
         except Exception as e:
             logger.debug(f"Momentum override calculation failed: {e}")
@@ -900,15 +909,30 @@ def get_trading_recommendation(ticker: str, final_buy_score: float, sentiment_df
         adjusted_buy_score += divergence_boost
         logger.debug(f"Divergence boost applied: {final_buy_score:.2f} + {divergence_boost:.2f} = {adjusted_buy_score:.2f}")
     
-    # OPTIMIZATION V5: Early entry bonus for bull markets
-    # In bull markets, give a small bonus to scores near threshold to encourage earlier entry
+    # OPTIMIZATION V8: Strategy-specific early entry bonuses for alpha generation
+    # Momentum strategy gets larger bonuses for faster entry
     early_entry_bonus = 0.0
     if market_regime in BULLISH_REGIMES and not momentum_override and not divergence_detected:
-        # V6: Larger bonus and wider range (only if no other boosts applied)
-        if 4.5 <= final_buy_score < 5.0:
-            early_entry_bonus = 0.15  # Increased from 0.10
-            adjusted_buy_score += early_entry_bonus
-            logger.debug(f"Early entry bonus: score {final_buy_score:.2f} + {early_entry_bonus:.2f}")
+        if strategy.lower() == "momentum":
+            # V8: Massive bonuses for momentum strategy
+            if 3.8 <= final_buy_score < 5.5:  # Very wide range
+                early_entry_bonus = 0.40  # Massive bonus
+                adjusted_buy_score += early_entry_bonus
+                logger.debug(f"Momentum early entry bonus: score {final_buy_score:.2f} + {early_entry_bonus:.2f}")
+            elif 3.0 <= final_buy_score < 3.8:  # Ultra-early entry
+                early_entry_bonus = 0.60  # Ultra-massive bonus
+                adjusted_buy_score += early_entry_bonus
+                logger.debug(f"Momentum ultra-early entry bonus: score {final_buy_score:.2f} + {early_entry_bonus:.2f}")
+        else:
+            # Value strategy: more conservative bonuses
+            if 4.0 <= final_buy_score < 5.2:  # Wider range (was 4.5-5.0)
+                early_entry_bonus = 0.25  # Larger bonus (was 0.15)
+                adjusted_buy_score += early_entry_bonus
+                logger.debug(f"Value early entry bonus: score {final_buy_score:.2f} + {early_entry_bonus:.2f}")
+            elif 3.5 <= final_buy_score < 4.0:  # Additional tier for very early entry
+                early_entry_bonus = 0.35  # Even larger bonus for very early signals
+                adjusted_buy_score += early_entry_bonus
+                logger.debug(f"Value very early entry bonus: score {final_buy_score:.2f} + {early_entry_bonus:.2f}")
     
     # Calculate adaptive thresholds and risk parameters
     buy_threshold, sell_threshold = calculate_adaptive_thresholds(score_history, market_regime, strategy=strategy, ticker=ticker)
