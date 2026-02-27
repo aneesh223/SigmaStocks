@@ -592,7 +592,7 @@ python backtester/examples.py
 - `functools.lru_cache` (stdlib) - Function-level memoization
 - `threading.Lock` (stdlib) - Thread-safe cache synchronization
 
-## 🧪 Testing
+## Testing
 
 The project includes comprehensive test coverage for the Convolutional Order Book feature:
 
