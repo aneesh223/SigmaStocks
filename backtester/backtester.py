@@ -324,9 +324,10 @@ class AlpacaBacktester:
             self.shares = 0
             self.entry_price = None  # Reset entry price
     
-    def detect_market_regime(self, price_data: pd.DataFrame, lookback_days: int = 60) -> str:
+    def detect_market_regime(self, price_data: pd.DataFrame, current_date: datetime = None, lookback_days: int = 60) -> str:
         """
-        Detect current market regime using shared logic
+        Detect current market regime usingshared logic.
+        Slices price_data to only include dates up to current_date to prevent future data leakage. 
         """
         import sys
         import os
@@ -334,9 +335,16 @@ class AlpacaBacktester:
         sys.path.insert(0, src_path)
         
         from logic import detect_market_regime
-        return detect_market_regime(price_data=price_data, lookback_days=lookback_days)
+        
+        # Prevent future data leakage by slicing up to current date if provided
+        if current_date is not None:
+            sliced_data = price_data[price_data.index <= current_date]
+        else:
+            sliced_data = price_data
+            
+        return detect_market_regime(price_data=sliced_data, lookback_days=lookback_days)
     
-    def get_adaptive_risk_params(self, market_regime: str) -> Dict:
+    def get_adaptive_risk_params(self, market_regime: str, current_date: datetime = None) -> Dict:
         """
         Get adaptive risk management parameters using shared logic with price volatility, strategy, and bull market duration
         """
@@ -347,11 +355,17 @@ class AlpacaBacktester:
         
         from logic import get_adaptive_risk_params, calculate_price_volatility, calculate_bull_market_duration
         
-        # Calculate price volatility from full price data
-        price_volatility = calculate_price_volatility(price_data=self.full_price_data)
+        # Prevent future data leakage by slicing up to current date if provided
+        if current_date is not None:
+            sliced_data = self.full_price_data[self.full_price_data.index <= current_date]
+        else:
+            sliced_data = self.full_price_data
+            
+        # Calculate price volatility from historical price data only
+        price_volatility = calculate_price_volatility(price_data=sliced_data)
         
-        # Calculate bull market duration
-        bull_market_duration = calculate_bull_market_duration(self.full_price_data, market_regime)
+        # Calculate bull market duration from historical price data only
+        bull_market_duration = calculate_bull_market_duration(sliced_data, market_regime)
         
         return get_adaptive_risk_params(market_regime, price_volatility, strategy=self.strategy, bull_market_duration=bull_market_duration)
     
@@ -367,7 +381,7 @@ class AlpacaBacktester:
         from logic import calculate_adaptive_thresholds
         return calculate_adaptive_thresholds(score_history, market_regime, lookback, strategy=self.strategy, bull_market_duration=self.current_bull_duration)
     
-    def check_adaptive_risk_management(self, current_price: float, portfolio_value: float, market_regime: str) -> Tuple[bool, str]:
+    def check_adaptive_risk_management(self, current_price: float, portfolio_value: float, market_regime: str, current_date: datetime = None) -> Tuple[bool, str]:
         """
         Check if adaptive risk management rules trigger a sell based on market regime with adaptive profit targets
         
@@ -375,6 +389,7 @@ class AlpacaBacktester:
             current_price: Current stock price
             portfolio_value: Current portfolio value
             market_regime: Current market regime
+            current_date: Current simulation date for accurate trailing calculations
             
         Returns:
             Tuple of (should_sell, reason)
@@ -382,8 +397,8 @@ class AlpacaBacktester:
         if self.shares == 0 or self.entry_price is None or self.entry_price <= 0:
             return False, ""
         
-        # Get adaptive risk parameters
-        risk_params = self.get_adaptive_risk_params(market_regime)
+        # Get adaptive risk parameters without data leak
+        risk_params = self.get_adaptive_risk_params(market_regime, current_date)
         
         # Update max portfolio value for trailing stop
         if portfolio_value > self.max_portfolio_value:
@@ -428,7 +443,7 @@ class AlpacaBacktester:
         Returns:
             True if in buy-and-hold mode
         """
-        risk_params = self.get_adaptive_risk_params(market_regime)
+        risk_params = self.get_adaptive_risk_params(market_regime, current_date=None)  # Safe default if no date passed
         return risk_params.get('buy_and_hold_mode', False)
     
     def check_overtrading_protection(self, current_date: datetime, market_regime: str) -> bool:
@@ -443,7 +458,7 @@ class AlpacaBacktester:
             True if trade should be blocked due to overtrading protection
         """
         # Get risk parameters to check if overtrading protection is enabled
-        risk_params = self.get_adaptive_risk_params(market_regime)
+        risk_params = self.get_adaptive_risk_params(market_regime, current_date)
         if not risk_params.get('overtrading_protection', False):
             return False
         
@@ -485,7 +500,7 @@ class AlpacaBacktester:
         
         if action == "BUY" and self.cash > 0:
             # Get adaptive position sizing with conviction scoring
-            risk_params = self.get_adaptive_risk_params(market_regime)
+            risk_params = self.get_adaptive_risk_params(market_regime, date)
             base_position_multiplier = risk_params['position_size_multiplier']
             
             # Validate price
@@ -672,11 +687,11 @@ class AlpacaBacktester:
         print()
         
         # INITIAL MARKET REGIME DETECTION for adaptive strategy
-        initial_market_regime = self.detect_market_regime(self.full_price_data)
+        initial_market_regime = self.detect_market_regime(self.full_price_data, current_date=start_date)
         current_market_regime = initial_market_regime
         print(f"Initial Market Regime: {initial_market_regime}")
         
-        risk_params = self.get_adaptive_risk_params(initial_market_regime)
+        risk_params = self.get_adaptive_risk_params(initial_market_regime, current_date=start_date)
         print(f"Initial Adaptive Parameters: Stop-loss: {risk_params['stop_loss_pct']*100:.0f}%, Take-profit: {risk_params['take_profit_pct']*100:.0f}%, Position size: {risk_params['position_size_multiplier']:.1f}x")
         print()
         
@@ -688,18 +703,56 @@ class AlpacaBacktester:
         score_history = []  # Track scores for dynamic thresholds and momentum reversal detection
         regime_update_counter = 0  # Track how often we update regime
         
+        
+        pending_buy_shares = 0
+        pending_buy_date = None
+        pending_buy_score = 0
+        pending_buy_regime = None
+        pending_sell = False
+        pending_sell_date = None
+        pending_sell_score = 0
+        pending_sell_regime = None
+        pending_sell_reason = ""
+        
         for i, simulation_date in enumerate(trading_days):
             try:
                 # Safe DataFrame access with error handling
                 try:
-                    current_price = self.full_price_data.loc[simulation_date, 'Close']
+                    current_close = self.full_price_data.loc[simulation_date, 'Close']
+                    current_open = self.full_price_data.loc[simulation_date, 'Open']
                 except (KeyError, IndexError):
                     print(f"Warning: No price data for {simulation_date.date()}, skipping...")
                     continue
                 
-                if current_price <= 0:
-                    print(f"Warning: Invalid price {current_price} for {simulation_date.date()}, skipping...")
+                if current_close <= 0 or current_open <= 0:
+                    print(f"Warning: Invalid price for {simulation_date.date()}, skipping...")
                     continue
+                
+                # OPTIMIZATION V9: EXECUTION LOOKAHEAD BIAS FIX
+                # Execute any pending trades from the PREVIOUS day at TODAY'S Open price.
+                # This prevents the algorithm from executing trades at the Close of Day T 
+                # using signals generated at the Close of Day T (which is mathematically impossible)
+                if pending_buy_shares > 0 and self.cash > 0:
+                    # Execute pending buy with T+1 open 
+                    actual_execution_price = current_open
+                    self.execute_adaptive_trade("BUY", actual_execution_price, simulation_date, pending_buy_score, pending_buy_regime)
+                    
+                    # Reset pending orders
+                    pending_buy_shares = 0
+                    pending_buy_date = None
+                
+                elif pending_sell and self.shares > 0:
+                    # Execute pending sell with T+1 open
+                    actual_execution_price = current_open
+                    self.execute_adaptive_trade("SELL", actual_execution_price, simulation_date, pending_sell_score, pending_sell_regime)
+                    if pending_sell_reason:
+                        print(f"   ↳ Executed pending sell triggered by: {pending_sell_reason}")
+                        
+                    # Reset pending orders
+                    pending_sell = False
+                    pending_sell_date = None
+                    pending_sell_reason = ""
+                
                 
                 # FAST LOOKUP: Get pre-calculated Final_Buy_Score for this date
                 sim_date_key = simulation_date.date() if hasattr(simulation_date, 'date') else simulation_date
@@ -720,8 +773,8 @@ class AlpacaBacktester:
                 score_history.append(buy_score_t)
                 self.score_history = score_history[-20:]  # Keep last 20 scores for conviction calculation
                 
-                # Calculate portfolio value
-                portfolio_value = self.cash + (self.shares * current_price)
+                # Calculate portfolio value using current close for daily NAV tracking
+                portfolio_value = self.cash + (self.shares * current_close)
                 
                 # OPTIMIZATION: Reduce momentum reversal detection frequency
                 # Check for regime changes at configurable intervals (not every 5 days)
@@ -787,11 +840,20 @@ class AlpacaBacktester:
                     self.bull_market_start_date = None
                     self.current_bull_duration = 0
                 
+                # OPTIMIZATION: Continually re-evaluate regime without future data
+                if i > 0 and i % regime_update_interval == 0:
+                    current_market_regime = self.detect_market_regime(self.full_price_data, simulation_date)
+                
                 # ADAPTIVE RISK MANAGEMENT: Check regime-specific stop-loss/take-profit first
-                should_sell_risk, risk_reason = self.check_adaptive_risk_management(current_price, portfolio_value, current_market_regime)
+                should_sell_risk, risk_reason = self.check_adaptive_risk_management(current_close, portfolio_value, current_market_regime, simulation_date)
                 if should_sell_risk:
-                    self.execute_adaptive_trade("SELL", current_price, simulation_date, buy_score_t, current_market_regime)
-                    print(f"{risk_reason}")
+                    # Queue the sell for T+1 Open
+                    pending_sell = True
+                    pending_sell_date = simulation_date
+                    pending_sell_score = buy_score_t
+                    pending_sell_regime = current_market_regime
+                    pending_sell_reason = risk_reason
+                    print(f"Pending {risk_reason} for T+1 Open")
                 else:
                     # ADAPTIVE THRESHOLDS: Calculate regime-aware buy/sell thresholds
                     buy_threshold, sell_threshold = self.calculate_adaptive_thresholds(score_history, current_market_regime)
@@ -802,22 +864,32 @@ class AlpacaBacktester:
                     
                     # Trading logic using adaptive thresholds with minimum holding period
                     if buy_score_t >= buy_threshold and self.shares == 0:
-                        # Strong buy signal - enter position with adaptive sizing
-                        self.execute_adaptive_trade("BUY", current_price, simulation_date, buy_score_t, current_market_regime)
+                        # Strong buy signal - Queue position for T+1 open
+                        pending_buy_shares = 1 # Flag to execute
+                        pending_buy_date = simulation_date
+                        pending_buy_score = buy_score_t
+                        pending_buy_regime = current_market_regime
+                        print(f"Queueing BUY signal for T+1 Open (Score: {buy_score_t:.1f})")
+                        
                     elif buy_score_t <= sell_threshold and self.shares > 0:
                         # Check minimum holding period before selling
-                        risk_params = self.get_adaptive_risk_params(current_market_regime)
+                        risk_params = self.get_adaptive_risk_params(current_market_regime, simulation_date)
                         min_hold_days = risk_params.get('min_hold_days', 0)
                         
                         if self.last_buy_date is None or (simulation_date - self.last_buy_date).days >= min_hold_days:
-                            # Weak signal - exit position (minimum holding period satisfied)
-                            self.execute_adaptive_trade("SELL", current_price, simulation_date, buy_score_t, current_market_regime)
+                            # Weak signal - Queue exit position for T+1 open
+                            pending_sell = True
+                            pending_sell_date = simulation_date
+                            pending_sell_score = buy_score_t
+                            pending_sell_regime = current_market_regime
+                            pending_sell_reason = "Signal Weakness Threshold Met"
+                            print(f"Queueing SELL signal for T+1 Open (Score: {buy_score_t:.1f})")
                         # else: Skip sell due to minimum holding period
                 
                 # Track portfolio value
                 self.portfolio_history.append({
                     'Date': simulation_date,
-                    'Price': current_price,
+                    'Price': current_close,
                     'Cash': self.cash,
                     'Shares': self.shares,
                     'Portfolio_Value': portfolio_value,
