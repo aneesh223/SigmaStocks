@@ -135,7 +135,7 @@ def test_function_logs_warning_on_empty_data():
             "Warning message should indicate no data was found"
 
 
-def test_api_exception_returns_empty_dataframe_and_logs_warning():
+def test_api_exception_returns_empty_dataframe_and_logs_error():
     """
     Test that API exceptions are handled gracefully.
     **Validates: Requirements 1.5**
@@ -146,7 +146,7 @@ def test_api_exception_returns_empty_dataframe_and_logs_warning():
     ticker = "ERROR"
     
     with patch('src.market.yf.Ticker') as mock_ticker_class, \
-         patch('src.market.logging.warning') as mock_warning:
+         patch('src.market.logging.error') as mock_error:
         
         # Mock an exception during API call
         mock_ticker_instance = MagicMock()
@@ -162,15 +162,15 @@ def test_api_exception_returns_empty_dataframe_and_logs_warning():
         assert result.empty, \
             "Result should be empty when exception occurs"
         
-        # Verify a warning was logged
-        mock_warning.assert_called_once()
+        # Verify an error was logged
+        mock_error.assert_called_once()
         
-        # Verify the warning message contains error information
-        warning_call_args = mock_warning.call_args[0][0]
-        assert ticker in warning_call_args, \
-            f"Warning message should contain ticker '{ticker}'"
-        assert "Error fetching intraday data" in warning_call_args, \
-            "Warning message should indicate an error occurred"
+        # Verify the error message contains error information
+        error_call_args = mock_error.call_args[0][0]
+        assert ticker in error_call_args, \
+            f"Error message should contain ticker '{ticker}'"
+        assert "Error fetching intraday data" in error_call_args, \
+            "Error message should indicate an error occurred"
 
 
 def test_dataframe_has_datetime_index():

@@ -33,12 +33,22 @@ def test_cnn_model_load_failure_logs_error_and_continues():
     src.microstructure._model = None
     src.microstructure._device = None
     
+    # Create valid test data
+    dates = pd.date_range(start='2024-01-01', periods=64, freq='1min')
+    df = pd.DataFrame({
+        'High': [100 + i * 0.1 for i in range(64)],
+        'Low': [99 + i * 0.1 for i in range(64)],
+        'Volume': [1000 + i * 10 for i in range(64)]
+    }, index=dates)
+    
     try:
-        # Mock torch.device to raise an exception
-        with patch('src.microstructure.torch.device', side_effect=Exception("CUDA error")):
-            with patch('src.microstructure.logger') as mock_logger:
-                # Try to analyze liquidity - should handle the error
-                result = analyze_liquidity('TEST')
+        # Mock get_intraday_data to return valid data so we reach the _get_model call
+        with patch('src.market.get_intraday_data', return_value=df):
+            # Mock torch.device to raise an exception
+            with patch('src.microstructure.torch.device', side_effect=Exception("CUDA error")):
+                with patch('src.microstructure.logger') as mock_logger:
+                    # Try to analyze liquidity - should handle the error
+                    result = analyze_liquidity('TEST')
                 
                 # Should return neutral score
                 assert result['anomaly_score'] == 0.5

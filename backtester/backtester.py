@@ -25,12 +25,18 @@ from alpaca.data.timeframe import TimeFrame
 # Add parent directory to path to import src modules
 parent_dir = os.path.join(os.path.dirname(__file__), '..')
 sys.path.insert(0, parent_dir)
-sys.path.insert(0, os.path.join(parent_dir, 'src'))
 
-import config
-import market
-import analyzer
-import scraper
+from src import config, market, analyzer, scraper
+from src.logic import (
+    detect_market_regime,
+    get_adaptive_risk_params,
+    calculate_price_volatility,
+    calculate_bull_market_duration,
+    calculate_adaptive_thresholds,
+    calculate_adaptive_profit_target,
+    calculate_conviction_score,
+    detect_momentum_reversal
+)
 from typing import Dict, List, Tuple, Optional
 import warnings
 warnings.filterwarnings("ignore")
@@ -329,13 +335,6 @@ class AlpacaBacktester:
         Detect current market regime usingshared logic.
         Slices price_data to only include dates up to current_date to prevent future data leakage. 
         """
-        import sys
-        import os
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-        sys.path.insert(0, src_path)
-        
-        from logic import detect_market_regime
-        
         # Prevent future data leakage by slicing up to current date if provided
         if current_date is not None:
             sliced_data = price_data[price_data.index <= current_date]
@@ -348,13 +347,6 @@ class AlpacaBacktester:
         """
         Get adaptive risk management parameters using shared logic with price volatility, strategy, and bull market duration
         """
-        import sys
-        import os
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-        sys.path.insert(0, src_path)
-        
-        from logic import get_adaptive_risk_params, calculate_price_volatility, calculate_bull_market_duration
-        
         # Prevent future data leakage by slicing up to current date if provided
         if current_date is not None:
             sliced_data = self.full_price_data[self.full_price_data.index <= current_date]
@@ -373,12 +365,6 @@ class AlpacaBacktester:
         """
         Calculate adaptive buy/sell thresholds using shared logic with strategy-specific optimizations and bull market duration
         """
-        import sys
-        import os
-        src_path = os.path.join(os.path.dirname(__file__), '..', 'src')
-        sys.path.insert(0, src_path)
-        
-        from logic import calculate_adaptive_thresholds
         return calculate_adaptive_thresholds(score_history, market_regime, lookback, strategy=self.strategy, bull_market_duration=self.current_bull_duration)
     
     def check_adaptive_risk_management(self, current_price: float, portfolio_value: float, market_regime: str, current_date: datetime = None) -> Tuple[bool, str]:
@@ -416,7 +402,6 @@ class AlpacaBacktester:
         bull_duration = risk_params.get('bull_duration_days', 0)
         
         # Import adaptive profit target calculation
-        from logic import calculate_adaptive_profit_target
         adaptive_profit_target = calculate_adaptive_profit_target(
             self.entry_price, current_price, bull_duration, base_profit_pct, market_regime
         )
@@ -509,7 +494,6 @@ class AlpacaBacktester:
                 return
             
             # Calculate conviction score for dynamic position sizing
-            from logic import calculate_conviction_score
             conviction_score = calculate_conviction_score(buy_score, self.score_history, market_regime)
             
             # Apply conviction to position sizing
@@ -786,7 +770,6 @@ class AlpacaBacktester:
                             recent_score_history = score_history[-10:]
                             
                             # Import momentum reversal detection
-                            from logic import detect_momentum_reversal
                             reversal_info = detect_momentum_reversal(recent_price_data, recent_score_history)
                         else:
                             reversal_info = {'reversal_detected': False}

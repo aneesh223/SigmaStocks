@@ -15,7 +15,7 @@ import numpy as np
 from unittest.mock import patch
 from src.logic import get_trading_recommendation
 
-def test_scenario(ticker, buy_score, strategy, anomaly_score, status):
+def run_scenario(ticker, buy_score, strategy, anomaly_score, status):
     """Test a specific microstructure scenario."""
     
     # Create mock data
@@ -128,7 +128,7 @@ def main():
         print(f"  Expected: {scenario['expected']}")
         print()
         
-        baseline, with_cob = test_scenario(
+        baseline, with_cob = run_scenario(
             scenario['ticker'],
             scenario['buy_score'],
             scenario['strategy'],
