@@ -199,7 +199,7 @@ def main():
             for item in results_copy['trade_log']:
                 item['Date'] = item['Date'].isoformat()
             
-            with open(filename, 'w') as f:
+            with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(results_copy, f, indent=2, default=str)
             
             print(f"Results saved to: {filename}")
