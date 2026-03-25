@@ -14,6 +14,11 @@ from src.microstructure import analyze_liquidity
 
 class TestAnalyzeLiquidity:
     """Test suite for analyze_liquidity function."""
+
+    @pytest.fixture(autouse=True)
+    def mock_model_trained(self):
+        with patch('src.microstructure._model_trained', True):
+            yield
     
     def test_analyze_liquidity_with_sufficient_data(self):
         """Test analyze_liquidity returns valid result with sufficient data."""

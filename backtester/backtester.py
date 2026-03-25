@@ -613,6 +613,12 @@ class AlpacaBacktester:
             (self.full_price_data.index <= end_date)
         ].index
         
+        import logging
+        if len(trading_days) > 0:
+            bars_before = len(self.full_price_data[self.full_price_data.index < trading_days[0]])
+            if bars_before < 200:
+                logging.warning('fewer than 200 price bars exist before trading_days[0]')
+        
         if len(trading_days) == 0:
             raise ValueError("No trading days found in the specified period")
         
@@ -647,8 +653,8 @@ class AlpacaBacktester:
                     ticker=self.ticker,
                     sentiment_df=full_sentiment_df,
                     strategy=self.strategy,
-                    lookback_days=lookback_days,
-                    custom_date=end_date,  # Use end date as reference
+                    lookback_days=simulation_days + 210,
+                    custom_date=None,  # Use end date as reference
                     price_data=self.full_price_data  # Use full price data
                 )
                 

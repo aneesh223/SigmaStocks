@@ -16,6 +16,10 @@ from typing import Optional, Dict, Union
 
 logger = logging.getLogger(__name__)
 
+import os
+MODEL_PATH = "models/orderbook_cnn.pt"
+_model_trained = False
+
 
 # Global model instance for lazy initialization
 _model = None
@@ -41,6 +45,14 @@ def _get_model():
         
         # Set to evaluation mode (no training)
         _model.eval()
+        
+        global _model_trained
+        if os.path.exists(MODEL_PATH):
+            _model.load_state_dict(torch.load(MODEL_PATH, map_location=_device))
+            _model_trained = True
+        else:
+            logger.warning("model weights not found")
+            _model_trained = False
         
     return _model, _device
 
@@ -261,6 +273,8 @@ def analyze_liquidity(ticker: str) -> Dict[str, Union[float, str]]:
         - Insufficient data: "Insufficient data for microstructure analysis"
     """
     try:
+        if not _model_trained:
+            return {'anomaly_score': 0.5, 'status': 'Model not trained', 'confidence': 'low'}
         # Import get_intraday_data from src.market
         from src.market import get_intraday_data
         
