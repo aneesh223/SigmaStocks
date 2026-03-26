@@ -9,7 +9,10 @@ import logging
 from typing import Dict, List, Tuple
 import yfinance as yf
 
-from .constants import SECTOR_THRESHOLDS, MOMENTUM_STRATEGY_THRESHOLDS, VALUE_STRATEGY_THRESHOLDS
+try:
+    from .constants import SECTOR_THRESHOLDS, MOMENTUM_STRATEGY_THRESHOLDS, VALUE_STRATEGY_THRESHOLDS
+except ImportError:
+    from constants import SECTOR_THRESHOLDS, MOMENTUM_STRATEGY_THRESHOLDS, VALUE_STRATEGY_THRESHOLDS
 
 # Regime classification constants
 BULLISH_REGIMES = {"BULL", "STRONG_BULL"}
