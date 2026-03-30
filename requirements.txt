@@ -10,6 +10,7 @@ alpaca-py>=0.7.0
 gnews>=0.3.0
 
 # Hybrid sentiment analysis: VADER + DistilRoBERTa
+--extra-index-url https://download.pytorch.org/whl/cu118
 vaderSentiment>=3.3.2
 transformers>=4.30.0
 torch>=2.0.0
