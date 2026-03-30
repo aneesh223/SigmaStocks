@@ -1,3 +1,7 @@
+# ==============================================================================
+# You MUST use Python 3.12 (or older 64-bit builds) for this project!
+# ==============================================================================
+
 # Core data processing (optimized versions)
 pandas>=2.0.0
 numpy>=1.24.0
