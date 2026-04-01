@@ -183,8 +183,9 @@ cython_debug/
 # VS Code
 .vscode/
 
-# Kiro
+# AI
 .kiro/
+.claude/
 
 # logs
 logs/
