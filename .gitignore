@@ -186,6 +186,7 @@ cython_debug/
 # AI
 .kiro/
 .claude/
+.claude-code-router/
 
 # logs
 logs/
